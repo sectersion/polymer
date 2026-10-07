@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { MCP_PATH, createMcpServer } from "./mcp.js";
+import { extractBearerToken, verifyTestCredential } from "./auth.js";
 
 export const HEALTH_PATH = "/health";
 
@@ -79,6 +80,31 @@ export async function createPolymerServer(): Promise<PolymerServer> {
           jsonResponse(res, 405, { error: "method_not_allowed" });
           return;
         }
+        // Component 3: authenticate every MCP request at the HTTP layer.
+        // Identity is derived from the Bearer credential, never from
+        // caller-supplied arguments. Verified identity is forwarded to
+        // tool handlers via `req.auth` -> `extra.authInfo`.
+        // Known limitation (pre-exists from component 2): one shared
+        // transport/McpServer serves all sessions, so `mcp-session-id`
+        // is not bound to the credential that created it. Session IDs
+        // are unguessable (randomUUID); binding them is follow-up work
+        // when the transport learns multi-session handling.
+        const token = extractBearerToken(req.headers["authorization"]);
+        const verified = verifyTestCredential(token);
+        if (!verified.ok) {
+          jsonResponse(res, 401, {
+            error: "unauthorized",
+            reason: verified.reason,
+          });
+          return;
+        }
+        (req as IncomingMessage & { auth?: unknown }).auth = {
+          token,
+          clientId: verified.principal.agentId,
+          scopes: [],
+          expiresAt: Math.floor(verified.principal.expiresAtMs / 1000),
+          extra: { agentId: verified.principal.agentId },
+        };
         const body = await readBody(req);
         if (
           typeof body === "symbol" ||
