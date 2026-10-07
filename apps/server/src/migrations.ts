@@ -2,9 +2,9 @@
  * Component 4: versioned SQLite migrations (hand-rolled, no framework).
  *
  * Component 5 adds the agents table (migration 002). Component 6 adds
- * the credentials table (migration 003). Application tables
- * for later components (tasks, ...) must each add their own
- * numbered migration here.
+ * the credentials table (migration 003). Component 10 adds the tasks
+ * and task_assignments tables (migration 004). Application tables
+ * for later components must each add their own numbered migration here.
  */
 
 export interface Migration {
@@ -62,6 +62,36 @@ CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);`,
 CREATE INDEX IF NOT EXISTS idx_credentials_agent ON credentials(agent_id);
 CREATE INDEX IF NOT EXISTS idx_credentials_public ON credentials(public_id);`,
     down: `DROP TABLE IF EXISTS credentials;`,
+  },
+  {
+    version: 4,
+    name: "004_tasks",
+    up: `CREATE TABLE tasks (
+  task_id TEXT PRIMARY KEY,
+  title TEXT NOT NULL CHECK(length(title) > 0),
+  description TEXT NULL,
+  status TEXT NOT NULL DEFAULT 'to_do'
+    CHECK(status IN ('to_do', 'in_progress', 'done', 'failed')),
+  version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+  created_by TEXT NOT NULL REFERENCES agents(agent_id),
+  coordinator TEXT NOT NULL REFERENCES agents(agent_id),
+  lease_expires_at TEXT NULL,
+  lease_generation INTEGER NOT NULL DEFAULT 0 CHECK(lease_generation >= 0),
+  trace_parent TEXT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_coordinator ON tasks(coordinator);
+CREATE TABLE task_assignments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL REFERENCES tasks(task_id),
+  agent_id TEXT NOT NULL REFERENCES agents(agent_id),
+  assigned_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  UNIQUE(task_id, agent_id)
+);`,
+    down: `DROP TABLE IF EXISTS task_assignments;
+DROP TABLE IF EXISTS tasks;`,
   },
 ];
 

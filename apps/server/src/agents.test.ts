@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  LATEST_VERSION,
   closeDatabase,
   getSchemaVersion,
   openDatabase,
@@ -55,7 +56,7 @@ describe("Agent table + service (component 5)", () => {
     closeDatabase(openHandles.pop()!);
     const reopened = openDatabase(path);
     openHandles.push(reopened);
-    expect(getSchemaVersion(reopened)).toBe(3);
+    expect(getSchemaVersion(reopened)).toBe(LATEST_VERSION);
     expect(getAgentById(reopened, created.agent_id)).toEqual(created);
   });
 
