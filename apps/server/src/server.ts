@@ -9,12 +9,18 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { MCP_PATH, createMcpServer } from "./mcp.js";
 import { extractBearerToken, verifyTestCredential } from "./auth.js";
+import { closeDatabase, openDatabase, type PolymerDatabase } from "./db.js";
 
 export const HEALTH_PATH = "/health";
 
 export interface PolymerServer {
   server: Server;
   mcpServer: McpServer;
+  db: PolymerDatabase | null;
+}
+
+export interface PolymerServerOptions {
+  databasePath?: string;
 }
 
 function jsonResponse(
@@ -48,8 +54,11 @@ function readBody(req: IncomingMessage): Promise<unknown | undefined> {
   });
 }
 
-export async function createPolymerServer(): Promise<PolymerServer> {
+export async function createPolymerServer(
+  options: PolymerServerOptions = {},
+): Promise<PolymerServer> {
   const mcpServer = createMcpServer();
+  const db = options.databasePath ? openDatabase(options.databasePath) : null;
   // Stateful transport: one instance manages MCP sessions (one session id
   // per client) across requests on the shared port. Stateless mode forbids
   // transport reuse, and a single McpServer accepts only one transport, so
@@ -136,7 +145,7 @@ export async function createPolymerServer(): Promise<PolymerServer> {
     }
   });
 
-  return { server, mcpServer };
+  return { server, mcpServer, db };
 }
 
 export interface ListeningServer extends PolymerServer {
@@ -147,8 +156,9 @@ export interface ListeningServer extends PolymerServer {
 export async function listen(
   host = "127.0.0.1",
   port = 0,
+  options: PolymerServerOptions = {},
 ): Promise<ListeningServer> {
-  const { server, mcpServer } = await createPolymerServer();
+  const { server, mcpServer, db } = await createPolymerServer(options);
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
   const address = server.address();
   const actualPort =
@@ -156,10 +166,21 @@ export async function listen(
   return {
     server,
     mcpServer,
+    db: db as ListeningServer["db"],
     url: `http://${host}:${actualPort}`,
     close: () =>
       new Promise<void>((resolve, reject) =>
-        server.close((err) => (err ? reject(err) : resolve())),
+        server.close((err) => {
+          if (db) {
+            try {
+              closeDatabase(db);
+            } catch {
+              // Server is already closing; surface the server error if any.
+            }
+          }
+          if (err) reject(err);
+          else resolve();
+        }),
       ),
   };
 }
