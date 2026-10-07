@@ -1,5 +1,10 @@
 import { createAgent } from "./agents.js";
-import { mintCredential, verifyScrypt } from "./credentials.js";
+import {
+  RECONNECT_TTL_MS,
+  SESSION_TTL_MS,
+  mintCredential,
+  verifyScrypt,
+} from "./credentials.js";
 import type { PolymerDatabase } from "./db.js";
 
 export interface RegisterAgentInput {
@@ -32,9 +37,6 @@ export class RegistrationError extends Error {
     this.name = "RegistrationError";
   }
 }
-
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const RECONNECT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 function isUniqueViolation(err: unknown): boolean {
   return (

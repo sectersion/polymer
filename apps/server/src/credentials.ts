@@ -8,6 +8,9 @@ import {
 } from "node:crypto";
 import type { PolymerDatabase } from "./db.js";
 
+export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const RECONNECT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
 export const CREDENTIAL_TYPES = [
   "master",
   "init",
@@ -261,4 +264,96 @@ export function verifySessionToken(
     ok: true,
     principal: { agentId: cred.agent_id, credentialId: cred.credential_id },
   };
+}
+
+export class RefreshError extends Error {
+  constructor(
+    readonly code: "reconnect_secret_invalid" | "reconnect_already_used",
+    readonly credentialId?: string,
+    readonly agentId?: string,
+  ) {
+    super(code);
+    this.name = "RefreshError";
+  }
+}
+
+export interface RefreshOutput {
+  agent_id: string;
+  session_token: string;
+  reconnect_secret: string;
+  expires_in: number;
+  reconnect_expires_in: number;
+}
+
+/**
+ * Component 9: rotate an agent reconnect credential. The presented
+ * secret must match an active, unexpired `agent_reconnect` row. On success the old row is invalidated
+ * (`revoked`) and a fresh session + reconnect pair is minted for the
+ * same agent, all in one transaction. Only the presented reconnect
+ * row is touched; existing session rows stay valid until expiry.
+ *
+ * A hash-matching but non-active row means the credential was already
+ * rotated: `reconnect_already_used` (replay; security event, never
+ * silently restored). Anything else (unknown id, wrong type, expired,
+ * hash mismatch) is `reconnect_secret_invalid`.
+ */
+export function refreshReconnect(
+  db: PolymerDatabase,
+  secret: string,
+): RefreshOutput {
+  const dot = secret.indexOf(".");
+  if (dot <= 0) {
+    throw new RefreshError("reconnect_secret_invalid");
+  }
+  const cred = getCredentialByPublicId(db, secret.slice(0, dot));
+  if (
+    !cred ||
+    cred.type !== "agent_reconnect" ||
+    cred.agent_id === null ||
+    (cred.expires_at !== null && Date.now() >= Date.parse(cred.expires_at)) ||
+    !constantTimeHexEqual(sha256Hex(secret), cred.token_hash)
+  ) {
+    throw new RefreshError("reconnect_secret_invalid");
+  }
+  if (cred.status !== "active") {
+    throw new RefreshError(
+      "reconnect_already_used",
+      cred.credential_id,
+      cred.agent_id,
+    );
+  }
+  const txn = db.transaction((): RefreshOutput => {
+    const consumed = db
+      .prepare(
+        "UPDATE credentials SET status = 'revoked' WHERE credential_id = ? AND status = 'active'",
+      )
+      .run(cred.credential_id);
+    if (consumed.changes !== 1) {
+      // A concurrent refresh won the race; never restore the old secret.
+      throw new RefreshError(
+        "reconnect_already_used",
+        cred.credential_id,
+        cred.agent_id,
+      );
+    }
+    const now = Date.now();
+    const session = mintCredential(db, {
+      type: "agent_session",
+      agentId: cred.agent_id,
+      expiresAt: new Date(now + SESSION_TTL_MS).toISOString(),
+    });
+    const reconnect = mintCredential(db, {
+      type: "agent_reconnect",
+      agentId: cred.agent_id,
+      expiresAt: new Date(now + RECONNECT_TTL_MS).toISOString(),
+    });
+    return {
+      agent_id: cred.agent_id as string,
+      session_token: session.secret,
+      reconnect_secret: reconnect.secret,
+      expires_in: SESSION_TTL_MS / 1000,
+      reconnect_expires_in: RECONNECT_TTL_MS / 1000,
+    };
+  });
+  return txn();
 }

@@ -9,8 +9,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { MCP_PATH, createMcpServer } from "./mcp.js";
 import { extractBearerToken } from "./auth.js";
-import { verifySessionToken } from "./credentials.js";
-import { InitVerifyLimiter } from "./rate-limit.js";
+import {
+  RefreshError,
+  refreshReconnect,
+  verifySessionToken,
+} from "./credentials.js";
+import { InitVerifyLimiter, RefreshLimiter } from "./rate-limit.js";
 import { closeDatabase, openDatabase, type PolymerDatabase } from "./db.js";
 
 export const HEALTH_PATH = "/health";
@@ -64,6 +68,9 @@ export async function createPolymerServer(
   // OTP verification budget: 10 req/min per IP + server-global 60/min,
   // consumed BEFORE any token lookup (component 7).
   const initVerifyLimiter = new InitVerifyLimiter();
+  // Refresh budget: 5 req/min per credential plus a server-global
+  // cap of 60/min (component 9).
+  const refreshLimiter = new RefreshLimiter();
   // Stateful transport: one instance manages MCP sessions (one session id
   // per client) across requests on the shared port. Stateless mode forbids
   // transport reuse, and a single McpServer accepts only one transport, so
@@ -82,6 +89,66 @@ export async function createPolymerServer(
 
       if (req.method === "GET" && path === HEALTH_PATH) {
         jsonResponse(res, 200, { ok: true });
+        return;
+      }
+
+      if (path === "/api/tokens/refresh") {
+        // Component 9: reconnect rotation. The reconnect credential is
+        // accepted here and nowhere else; identity comes from the
+        // credential, never the body.
+        if (req.method !== "POST") {
+          jsonResponse(res, 405, { error: "method_not_allowed" });
+          return;
+        }
+        if (!db) {
+          jsonResponse(res, 503, { error: "database_error" });
+          return;
+        }
+        const token = extractBearerToken(req.headers["authorization"]);
+        if (token === undefined) {
+          jsonResponse(res, 401, { error: "reconnect_secret_invalid" });
+          return;
+        }
+        const dot = token.indexOf(".");
+        if (!refreshLimiter.consume(dot <= 0 ? token : token.slice(0, dot))) {
+          jsonResponse(res, 429, {
+            error: "rate_limit_exceeded",
+            retry_after: 60,
+          });
+          return;
+        }
+        const body = await readBody(req);
+        if (
+          typeof body !== "object" ||
+          body === null ||
+          Array.isArray(body) ||
+          typeof body === "symbol"
+        ) {
+          jsonResponse(res, 400, { error: "invalid_request" });
+          return;
+        }
+        try {
+          const out = refreshReconnect(db, token);
+          jsonResponse(res, 200, out);
+        } catch (err) {
+          if (err instanceof RefreshError) {
+            if (err.code === "reconnect_already_used") {
+              // Security event: no secret material, identifiers only.
+              console.warn(
+                JSON.stringify({
+                  event: "reconnect_already_used",
+                  credential_id: err.credentialId,
+                  agent_id: err.agentId,
+                  ip: req.socket.remoteAddress ?? "unknown",
+                  at: new Date().toISOString(),
+                }),
+              );
+            }
+            jsonResponse(res, 401, { error: err.code });
+            return;
+          }
+          throw err;
+        }
         return;
       }
 
