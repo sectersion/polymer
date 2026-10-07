@@ -130,14 +130,20 @@ export function mintCredential(
   db: PolymerDatabase,
   input: MintCredentialInput,
 ): { credential: Credential; secret: string } {
-  const secret =
+  const rawSecret =
     input.secret ??
     (input.type === "init" ? generateInitOtp() : generateMachineSecret());
-  const tokenHash = hashForType(input.type, secret);
   const credentialId = randomUUID();
   const publicId =
     input.publicId ??
     (input.type === "init" ? null : randomBytes(8).toString("hex"));
+  // Machine tokens carry their public lookup prefix: "<publicId>.<secret>".
+  // Init OTPs stay bare 6-digit codes looked up by credential_id.
+  const secret =
+    publicId !== null && input.secret === undefined
+      ? `${publicId}.${rawSecret}`
+      : rawSecret;
+  const tokenHash = hashForType(input.type, secret);
   const row = db
     .prepare(
       `INSERT INTO credentials
@@ -222,4 +228,37 @@ export function revokeCredential(
     )
     .get(credentialId) as Record<string, unknown> | undefined;
   return row === undefined ? undefined : toCredential(row);
+}
+
+export interface SessionPrincipal {
+  agentId: string;
+  credentialId: string;
+}
+
+/**
+ * Component 7: verify an agent session Bearer against the credentials
+ * table. Only `agent_session` rows authenticate MCP traffic; reconnect
+ * credentials (and everything else) authenticate nothing here.
+ */
+export function verifySessionToken(
+  db: PolymerDatabase,
+  token: string,
+): { ok: true; principal: SessionPrincipal } | { ok: false } {
+  const dot = token.indexOf(".");
+  if (dot <= 0) return { ok: false };
+  const cred = getCredentialByPublicId(db, token.slice(0, dot));
+  if (!cred || cred.type !== "agent_session" || cred.status !== "active") {
+    return { ok: false };
+  }
+  if (cred.expires_at !== null && Date.now() >= Date.parse(cred.expires_at)) {
+    return { ok: false };
+  }
+  if (!constantTimeHexEqual(sha256Hex(token), cred.token_hash)) {
+    return { ok: false };
+  }
+  if (cred.agent_id === null) return { ok: false };
+  return {
+    ok: true,
+    principal: { agentId: cred.agent_id, credentialId: cred.credential_id },
+  };
 }

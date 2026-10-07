@@ -9,6 +9,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { MCP_PATH, createMcpServer } from "./mcp.js";
 import { extractBearerToken, verifyTestCredential } from "./auth.js";
+import { verifySessionToken } from "./credentials.js";
+import { InitVerifyLimiter } from "./rate-limit.js";
 import { closeDatabase, openDatabase, type PolymerDatabase } from "./db.js";
 
 export const HEALTH_PATH = "/health";
@@ -57,8 +59,11 @@ function readBody(req: IncomingMessage): Promise<unknown | undefined> {
 export async function createPolymerServer(
   options: PolymerServerOptions = {},
 ): Promise<PolymerServer> {
-  const mcpServer = createMcpServer();
   const db = options.databasePath ? openDatabase(options.databasePath) : null;
+  const mcpServer = createMcpServer(db);
+  // OTP verification budget: 10 req/min per IP + server-global 60/min,
+  // consumed BEFORE any token lookup (component 7).
+  const initVerifyLimiter = new InitVerifyLimiter();
   // Stateful transport: one instance manages MCP sessions (one session id
   // per client) across requests on the shared port. Stateless mode forbids
   // transport reuse, and a single McpServer accepts only one transport, so
@@ -89,31 +94,39 @@ export async function createPolymerServer(
           jsonResponse(res, 405, { error: "method_not_allowed" });
           return;
         }
-        // Component 3: authenticate every MCP request at the HTTP layer.
+        // Component 3+7: authenticate every MCP request at the HTTP layer.
         // Identity is derived from the Bearer credential, never from
-        // caller-supplied arguments. Verified identity is forwarded to
-        // tool handlers via `req.auth` -> `extra.authInfo`.
-        // Known limitation (pre-exists from component 2): one shared
-        // transport/McpServer serves all sessions, so `mcp-session-id`
-        // is not bound to the credential that created it. Session IDs
-        // are unguessable (randomUUID); binding them is follow-up work
-        // when the transport learns multi-session handling.
+        // caller-supplied arguments. DB agent-session tokens are tried
+        // first (component 7); the in-memory test verifier (component 3)
+        // remains for earlier suites. The single exemption is an
+        // unauthenticated `register_agent` tools/call, which bootstraps
+        // credentials and is OTP rate-limited below.
         const token = extractBearerToken(req.headers["authorization"]);
-        const verified = verifyTestCredential(token);
-        if (!verified.ok) {
-          jsonResponse(res, 401, {
-            error: "unauthorized",
-            reason: verified.reason,
-          });
-          return;
+        let agentId: string | undefined;
+        if (token !== undefined) {
+          if (db) {
+            const session = verifySessionToken(db, token);
+            if (session.ok) agentId = session.principal.agentId;
+          }
+          if (agentId === undefined) {
+            const verified = verifyTestCredential(token);
+            if (!verified.ok) {
+              jsonResponse(res, 401, {
+                error: "unauthorized",
+                reason: verified.reason,
+              });
+              return;
+            }
+            agentId = verified.principal.agentId;
+          }
+          (req as IncomingMessage & { auth?: unknown }).auth = {
+            token,
+            clientId: agentId,
+            scopes: [],
+            expiresAt: Math.floor(Date.now() / 1000) + 3600,
+            extra: { agentId },
+          };
         }
-        (req as IncomingMessage & { auth?: unknown }).auth = {
-          token,
-          clientId: verified.principal.agentId,
-          scopes: [],
-          expiresAt: Math.floor(verified.principal.expiresAtMs / 1000),
-          extra: { agentId: verified.principal.agentId },
-        };
         const body = await readBody(req);
         if (
           typeof body === "symbol" ||
@@ -131,6 +144,25 @@ export async function createPolymerServer(
           );
           return;
         }
+        if (agentId === undefined) {
+          if (!isBootstrapCall(body)) {
+            jsonResponse(res, 401, {
+              error: "unauthorized",
+              reason: "missing",
+            });
+            return;
+          }
+          if (isRegisterAgentCall(body)) {
+            const ip = req.socket.remoteAddress ?? "unknown";
+            if (!initVerifyLimiter.consume(ip)) {
+              jsonResponse(res, 429, {
+                error: "rate_limit_exceeded",
+                retry_after: 60,
+              });
+              return;
+            }
+          }
+        }
         await transport.handleRequest(req, res, body);
         return;
       }
@@ -146,6 +178,28 @@ export async function createPolymerServer(
   });
 
   return { server, mcpServer, db };
+}
+
+function isRegisterAgentCall(body: unknown): boolean {
+  if (typeof body !== "object" || body === null) return false;
+  const msg = body as { method?: unknown; params?: { name?: unknown } };
+  if (msg.method !== "tools/call") return false;
+  return (
+    (msg.params as { name?: unknown } | undefined)?.name === "register_agent"
+  );
+}
+
+/**
+ * Unauthenticated MCP bootstrap surface: session handshake plus the
+ * single-use `register_agent` call. Everything else (tools/list,
+ * any other tool) requires a Bearer credential and gets 401.
+ */
+function isBootstrapCall(body: unknown): boolean {
+  if (typeof body !== "object" || body === null) return false;
+  const msg = body as { method?: unknown };
+  if (msg.method === "initialize") return true;
+  if (msg.method === "notifications/initialized") return true;
+  return isRegisterAgentCall(body);
 }
 
 export interface ListeningServer extends PolymerServer {
