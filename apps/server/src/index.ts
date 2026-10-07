@@ -37,26 +37,21 @@ function main(): void {
   const host = process.env.POLYMER_HOST ?? DEFAULT_HOST;
 
   console.log(buildStartupMessage(host, port));
-  console.log(
-    "polymer server ready (skeleton: no SQLite, MCP, REST, or telemetry yet)",
-  );
 
-  const shutdown = (signal: string) => {
-    console.log(`polymer server received ${signal}, shutting down cleanly`);
-    process.exit(0);
-  };
+  void import("./server.js").then(async ({ createPolymerServer }) => {
+    const { server } = await createPolymerServer();
+    server.listen(port, host, () => {
+      console.log(`polymer server ready on ${host}:${port}`);
+    });
 
-  // Skeleton keep-alive: nothing listens yet (HTTP arrives in component 1),
-  // and an awaited promise alone does not hold the event loop. A ref'd
-  // timer does; the HTTP listener replaces it in component 1.
-  const keepAlive = setInterval(() => {}, 60_000);
-  process.on("SIGINT", () => {
-    clearInterval(keepAlive);
-    shutdown("SIGINT");
-  });
-  process.on("SIGTERM", () => {
-    clearInterval(keepAlive);
-    shutdown("SIGTERM");
+    const shutdown = (signal: string) => {
+      console.log(`polymer server received ${signal}, shutting down cleanly`);
+      server.close(() => process.exit(0));
+      setTimeout(() => process.exit(0), 1000).unref();
+    };
+
+    process.on("SIGINT", () => shutdown("SIGINT"));
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
   });
 }
 

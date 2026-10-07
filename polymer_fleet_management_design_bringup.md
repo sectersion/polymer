@@ -2911,3 +2911,6 @@ mini-design, not a drive-by.
     rollup tables**: per their in-doc conditions.
 -   **Dark-mode design target**: tokens support it; MVP designs
     light-first.
+-   **MCP request body size cap**: the component-2 `/mcp` body reader
+    buffers without a limit (localhost-only bringup). Cap it (e.g. 1 MiB
+    + `413`) alongside `security.maxMessageSize` enforcement.
