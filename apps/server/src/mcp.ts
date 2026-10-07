@@ -8,6 +8,7 @@ import {
   registerSubagent,
   RegistrationError,
 } from "./registration.js";
+import { TaskAgentNotFoundError, createTask } from "./tasks.js";
 
 export const MCP_PATH = "/mcp";
 
@@ -26,9 +27,13 @@ function registrationError(err: unknown): never {
   throw err;
 }
 
-function toolResult(body: { [key: string]: string | number | boolean }): {
+type ToolBody = {
+  [key: string]: string | number | boolean | string[] | null;
+};
+
+function toolResult(body: ToolBody): {
   content: Array<{ type: "text"; text: string }>;
-  structuredContent: { [key: string]: string | number | boolean };
+  structuredContent: ToolBody;
 } {
   return {
     content: [{ type: "text", text: JSON.stringify(body) }],
@@ -115,6 +120,56 @@ export function createMcpServer(db: PolymerDatabase | null = null): McpServer {
         return toolResult({ ...out });
       } catch (err) {
         registrationError(err);
+      }
+    },
+  );
+  server.registerTool(
+    "create_task",
+    {
+      description:
+        "Create a task; the authenticated caller becomes creator and coordinator (session auth only)",
+      inputSchema: {
+        title: z.string().min(1),
+        description: z.string().optional(),
+        trace_parent: z.string().optional(),
+      },
+    },
+    async (args, extra) => {
+      if (db === null) {
+        throw new McpError(ErrorCode.InternalError, "database_error");
+      }
+      const caller = callerAgentId(extra);
+      if (caller === undefined) {
+        throw new McpError(ErrorCode.InvalidRequest, "unauthorized");
+      }
+      try {
+        const task = createTask(db, {
+          title: args.title,
+          description: args.description,
+          traceParent: args.trace_parent,
+          createdBy: caller,
+        });
+        return toolResult({
+          task_id: task.task_id,
+          title: task.title,
+          status: task.status,
+          created_by: task.created_by,
+          coordinator: task.coordinator,
+          assigned_to: [],
+          version: task.version,
+          lease_generation: task.lease_generation,
+          lease_expires_at: task.lease_expires_at,
+          trace_parent: task.trace_parent,
+          created_at: task.created_at,
+        });
+      } catch (err) {
+        if (err instanceof TaskAgentNotFoundError) {
+          throw new McpError(ErrorCode.InvalidRequest, err.code);
+        }
+        if (err instanceof Error) {
+          throw new McpError(ErrorCode.InvalidRequest, err.message);
+        }
+        throw err;
       }
     },
   );
