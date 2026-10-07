@@ -1,0 +1,11 @@
+{
+  "name": "@polymer/cli",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo \"@polymer/cli: deferred to v2, not built in MVP\"",
+    "test": "echo \"@polymer/cli: deferred to v2, not built in MVP\"",
+    "lint": "echo \"@polymer/cli: deferred to v2, not built in MVP\"",
+    "typecheck": "echo \"@polymer/cli: deferred to v2, not built in MVP\""
+  }
+}

@@ -1,0 +1,8 @@
+node_modules
+dist
+coverage
+.turbo
+*.tsbuildinfo
+apps/web/.next
+apps/web/out
+pnpm-debug.log*

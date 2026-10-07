@@ -1,0 +1,11 @@
+{
+  "name": "@polymer/skill",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo \"@polymer/skill: no build yet (component 30)\"",
+    "test": "echo \"@polymer/skill: no tests yet (component 30)\"",
+    "lint": "echo \"@polymer/skill: no lint yet (component 30)\"",
+    "typecheck": "echo \"@polymer/skill: no typecheck yet (component 30)\""
+  }
+}

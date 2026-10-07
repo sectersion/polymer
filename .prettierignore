@@ -1,0 +1,12 @@
+node_modules
+dist
+coverage
+.turbo
+*.tsbuildinfo
+apps/web/.next
+apps/web/out
+pnpm-lock.yaml
+polymer_fleet_management_design_bringup.md
+README.md
+SKILL_PLAN.md
+HUMANS.md

@@ -1,0 +1,11 @@
+{
+  "name": "@polymer/web",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo \"@polymer/web: no build yet (component 20)\"",
+    "test": "echo \"@polymer/web: no tests yet (component 20)\"",
+    "lint": "echo \"@polymer/web: no lint yet (component 20)\"",
+    "typecheck": "echo \"@polymer/web: no typecheck yet (component 20)\""
+  }
+}
