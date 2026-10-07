@@ -42,7 +42,7 @@ export function createMcpServer(db: PolymerDatabase | null = null): McpServer {
     "ping",
     {
       description:
-        "Liveness probe (component 3: requires authentication; agent_id args are ignored)",
+        "Liveness probe (requires agent session auth; agent_id args are ignored)",
       inputSchema: { agent_id: z.string().optional() },
     },
     async (_args, extra) => {

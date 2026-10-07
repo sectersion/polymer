@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { MCP_PATH, createMcpServer } from "./mcp.js";
-import { extractBearerToken, verifyTestCredential } from "./auth.js";
+import { extractBearerToken } from "./auth.js";
 import { verifySessionToken } from "./credentials.js";
 import { InitVerifyLimiter } from "./rate-limit.js";
 import { closeDatabase, openDatabase, type PolymerDatabase } from "./db.js";
@@ -94,31 +94,27 @@ export async function createPolymerServer(
           jsonResponse(res, 405, { error: "method_not_allowed" });
           return;
         }
-        // Component 3+7: authenticate every MCP request at the HTTP layer.
+        // Component 8: authenticate every MCP request at the HTTP layer
+        // against the real agent-session credentials in SQLite.
         // Identity is derived from the Bearer credential, never from
-        // caller-supplied arguments. DB agent-session tokens are tried
-        // first (component 7); the in-memory test verifier (component 3)
-        // remains for earlier suites. The single exemption is an
+        // caller-supplied arguments. Only `agent_session` rows
+        // authenticate (see verifySessionToken); reconnect credentials
+        // authenticate nothing here. The single exemption is an
         // unauthenticated `register_agent` tools/call, which bootstraps
-        // credentials and is OTP rate-limited below.
+        // credentials and is OTP rate-limited below. Without a database
+        // the server fails closed (401 on every MCP call).
         const token = extractBearerToken(req.headers["authorization"]);
         let agentId: string | undefined;
-        if (token !== undefined) {
-          if (db) {
-            const session = verifySessionToken(db, token);
-            if (session.ok) agentId = session.principal.agentId;
+        if (token !== undefined && db) {
+          const session = verifySessionToken(db, token);
+          if (!session.ok) {
+            jsonResponse(res, 401, {
+              error: "unauthorized",
+              reason: "invalid",
+            });
+            return;
           }
-          if (agentId === undefined) {
-            const verified = verifyTestCredential(token);
-            if (!verified.ok) {
-              jsonResponse(res, 401, {
-                error: "unauthorized",
-                reason: verified.reason,
-              });
-              return;
-            }
-            agentId = verified.principal.agentId;
-          }
+          agentId = session.principal.agentId;
           (req as IncomingMessage & { auth?: unknown }).auth = {
             token,
             clientId: agentId,
