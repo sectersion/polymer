@@ -55,7 +55,7 @@ describe("Agent table + service (component 5)", () => {
     closeDatabase(openHandles.pop()!);
     const reopened = openDatabase(path);
     openHandles.push(reopened);
-    expect(getSchemaVersion(reopened)).toBe(2);
+    expect(getSchemaVersion(reopened)).toBe(3);
     expect(getAgentById(reopened, created.agent_id)).toEqual(created);
   });
 

@@ -36,9 +36,10 @@ describe("SQLite connection and migrations (component 4)", () => {
   it("brings an empty database to the expected schema version", () => {
     const db = openDatabase(tempDbPath());
     openHandles.push(db);
-    expect(getSchemaVersion(db)).toBe(2);
+    expect(getSchemaVersion(db)).toBe(3);
     expect(tableExists(db, "_migration_probe")).toBe(true);
     expect(tableExists(db, "agents")).toBe(true);
+    expect(tableExists(db, "credentials")).toBe(true);
     expect(tableExists(db, "schema_migrations")).toBe(true);
   });
 
@@ -71,12 +72,12 @@ describe("SQLite connection and migrations (component 4)", () => {
     const path = tempDbPath();
     const first = openDatabase(path);
     openHandles.push(first);
-    expect(getAppliedVersions(first)).toEqual([1, 2]);
+    expect(getAppliedVersions(first)).toEqual([1, 2, 3]);
     closeDatabase(openHandles.pop()!);
     const second = openDatabase(path);
     openHandles.push(second);
-    expect(getAppliedVersions(second)).toEqual([1, 2]);
-    expect(getSchemaVersion(second)).toBe(2);
+    expect(getAppliedVersions(second)).toEqual([1, 2, 3]);
+    expect(getSchemaVersion(second)).toBe(3);
     const applied = migrateUp(second);
     expect(applied).toEqual([]);
   });
@@ -84,6 +85,10 @@ describe("SQLite connection and migrations (component 4)", () => {
   it("rollback removes the latest migration; up re-applies", () => {
     const db = openDatabase(tempDbPath());
     openHandles.push(db);
+    expect(migrateDown(db)).toBe(3);
+    expect(getSchemaVersion(db)).toBe(2);
+    expect(tableExists(db, "credentials")).toBe(false);
+    expect(tableExists(db, "agents")).toBe(true);
     expect(migrateDown(db)).toBe(2);
     expect(getSchemaVersion(db)).toBe(1);
     expect(tableExists(db, "agents")).toBe(false);
@@ -92,9 +97,10 @@ describe("SQLite connection and migrations (component 4)", () => {
     expect(getSchemaVersion(db)).toBe(0);
     expect(tableExists(db, "_migration_probe")).toBe(false);
     expect(migrateDown(db)).toBeNull();
-    expect(migrateUp(db)).toEqual([1, 2]);
+    expect(migrateUp(db)).toEqual([1, 2, 3]);
     expect(tableExists(db, "_migration_probe")).toBe(true);
     expect(tableExists(db, "agents")).toBe(true);
+    expect(tableExists(db, "credentials")).toBe(true);
   });
 
   it("reset wipes and reinitializes to the latest version", () => {
@@ -105,7 +111,7 @@ describe("SQLite connection and migrations (component 4)", () => {
     closeDatabase(openHandles.pop()!);
     const fresh = migrateReset(path);
     openHandles.push(fresh);
-    expect(getSchemaVersion(fresh)).toBe(2);
+    expect(getSchemaVersion(fresh)).toBe(3);
     const count = (
       fresh.prepare("SELECT COUNT(*) AS n FROM _migration_probe").get() as {
         n: number;
@@ -121,7 +127,7 @@ describe("SQLite connection and migrations (component 4)", () => {
       const res = await fetch(`${app.url}/health`);
       expect(res.status).toBe(200);
       expect(app.db).not.toBeNull();
-      expect(getSchemaVersion(app.db!)).toBe(2);
+      expect(getSchemaVersion(app.db!)).toBe(3);
       expect(tableExists(app.db!, "_migration_probe")).toBe(true);
     } finally {
       await app.close();
