@@ -322,6 +322,9 @@ export function refreshReconnect(
       cred.agent_id,
     );
   }
+  // Narrowed once here: property narrowing does not survive into the
+  // transaction closure below.
+  const agentId = cred.agent_id;
   const txn = db.transaction((): RefreshOutput => {
     const consumed = db
       .prepare(
@@ -333,7 +336,7 @@ export function refreshReconnect(
       throw new RefreshError(
         "reconnect_already_used",
         cred.credential_id,
-        cred.agent_id,
+        agentId,
       );
     }
     const now = Date.now();
