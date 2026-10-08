@@ -3,25 +3,20 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { PolymerDatabase } from "../database/db.js";
 import {
-  DETAIL_EMBEDDED_COMMENTS,
   TASK_STATUSES,
   assignTask,
   claimTask,
   createTask,
-  getTask,
-  latestComments,
+  getTaskDetail,
   listTaskAssignees,
   listTasks,
   requestUnassignment,
+  serializeTaskDetail,
+  taskListItem,
   transferCoordinator,
   updateTaskStatus,
 } from "../tasks/index.js";
-import {
-  callerAgentId,
-  taskListItem,
-  taskToolError,
-  toolResult,
-} from "./shared.js";
+import { callerAgentId, taskToolError, toolResult } from "./shared.js";
 
 export function registerTaskTools(
   server: McpServer,
@@ -169,43 +164,13 @@ export function registerTaskTools(
       }
       try {
         // One read transaction: task + assignees + the embedded
-        // comment window all come from a single snapshot.
-        const detail = db.transaction(() => {
-          const task = getTask(db, args.task_id);
-          if (task === undefined) return undefined;
-          return {
-            task,
-            assigneeIds: listTaskAssignees(db, task.task_id).map(
-              (a) => a.agent_id,
-            ),
-            comments: latestComments(
-              db,
-              task.task_id,
-              DETAIL_EMBEDDED_COMMENTS,
-            ),
-          };
-        })();
+        // comment window all come from a single snapshot (the same
+        // composite REST serves).
+        const detail = getTaskDetail(db, args.task_id);
         if (detail === undefined) {
           throw new McpError(ErrorCode.InvalidRequest, "task_not_found");
         }
-        const { task, assigneeIds, comments } = detail;
-        return toolResult({
-          task_id: task.task_id,
-          title: task.title,
-          description: task.description,
-          status: task.status,
-          version: task.version,
-          created_by: task.created_by,
-          coordinator: task.coordinator,
-          lease_generation: task.lease_generation,
-          lease_expires_at: task.lease_expires_at,
-          trace_parent: task.trace_parent,
-          assigned_to: assigneeIds,
-          comments: comments.comments,
-          has_more: comments.has_more,
-          created_at: task.created_at,
-          updated_at: task.updated_at,
-        });
+        return toolResult(serializeTaskDetail(detail));
       } catch (err) {
         taskToolError(err);
       }

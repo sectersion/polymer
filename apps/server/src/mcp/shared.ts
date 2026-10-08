@@ -11,7 +11,6 @@ import {
   TaskUnauthorizedError,
   TaskVersionMismatchError,
   PingNotFoundError,
-  type Task,
 } from "../tasks/index.js";
 
 export const heartbeatSchema = z.number().int().positive().optional();
@@ -64,23 +63,6 @@ export function taskToolError(err: unknown): never {
     throw new McpError(ErrorCode.InvalidRequest, err.message);
   }
   throw err;
-}
-
-/** Fleet-wide task summary: the same serialization `create_task` returns. */
-export function taskListItem(task: Task, assignedTo: string[]) {
-  return {
-    task_id: task.task_id,
-    title: task.title,
-    status: task.status,
-    created_by: task.created_by,
-    coordinator: task.coordinator,
-    assigned_to: assignedTo,
-    version: task.version,
-    lease_generation: task.lease_generation,
-    lease_expires_at: task.lease_expires_at,
-    trace_parent: task.trace_parent,
-    created_at: task.created_at,
-  };
 }
 
 export function toolResult(body: ToolBody): {

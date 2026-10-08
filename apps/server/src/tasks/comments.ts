@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PolymerDatabase } from "../database/db.js";
 import { getAgentByName } from "../identity/agents.js";
 import { TaskNotFoundError } from "./errors.js";
-import { getTask } from "./store.js";
+import { getTask, encodeCursor, decodeCursor } from "./store.js";
 
 export const COMMENT_PAGE_DEFAULT = 50;
 export const COMMENT_PAGE_MAX = 500;
@@ -169,24 +169,11 @@ export function markPingRead(
   return { success: true };
 }
 
+/** Opaque pagination cursor helpers are shared with the task list
+ * (store.ts) so REST cursors never drift between surfaces. */
 export interface CommentPage {
   comments: Comment[];
   next_cursor: string | null;
-}
-
-/** Opaque pagination cursor: the rowid of the last returned row. */
-function encodeCursor(rowid: number): string {
-  return Buffer.from(`c${rowid}`, "utf8").toString("base64url");
-}
-
-function decodeCursor(cursor: string): number {
-  const raw = Buffer.from(cursor, "base64url").toString("utf8");
-  if (!raw.startsWith("c")) throw new Error("invalid_cursor");
-  const rowid = Number(raw.slice(1));
-  if (!Number.isInteger(rowid) || rowid < 0) {
-    throw new Error("invalid_cursor");
-  }
-  return rowid;
 }
 
 /** Component 17: chronological comment history, cursor-paginated

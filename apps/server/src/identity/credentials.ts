@@ -277,6 +277,32 @@ export function verifySessionToken(
   };
 }
 
+/**
+ * Component 18: verify a service-seeded or logged-in administrator
+ * session from its `<publicId>.<secret>` credential (SHA-256, like
+ * every machine secret; scrypt stays reserved for master/init codes).
+ * Reads authenticate with the session alone — CSRF is a mutation
+ * concern that arrives with the admin routes (component 19).
+ */
+export function verifyAdminSession(
+  db: PolymerDatabase,
+  token: string,
+): { ok: true; credentialId: string } | { ok: false } {
+  const dot = token.indexOf(".");
+  if (dot <= 0) return { ok: false };
+  const cred = getCredentialByPublicId(db, token.slice(0, dot));
+  if (!cred || cred.type !== "admin_session" || cred.status !== "active") {
+    return { ok: false };
+  }
+  if (cred.expires_at !== null && Date.now() >= Date.parse(cred.expires_at)) {
+    return { ok: false };
+  }
+  if (!constantTimeHexEqual(sha256Hex(token), cred.token_hash)) {
+    return { ok: false };
+  }
+  return { ok: true, credentialId: cred.credential_id };
+}
+
 export class RefreshError extends Error {
   constructor(
     readonly code: "reconnect_secret_invalid" | "reconnect_already_used",

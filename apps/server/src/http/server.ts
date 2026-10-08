@@ -7,6 +7,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { MCP_PATH, createMcpServer } from "../mcp/index.js";
+import { handleRestRequest } from "./rest.js";
 import { extractBearerToken } from "../identity/auth.js";
 import {
   RefreshError,
@@ -322,6 +323,14 @@ export async function createPolymerServer(
           }
           throw err;
         }
+        return;
+      }
+
+      if (url.pathname.startsWith("/api/")) {
+        // Component 18: the read-only REST surface (admin session
+        // cookie). /api/tokens/refresh above stays first: it has its
+        // own reconnect-Bearer contract with no session.
+        handleRestRequest(req, res, url, db);
         return;
       }
 

@@ -148,31 +148,14 @@ export function listTasks(
   if (!Number.isInteger(limit) || limit <= 0 || limit > 500) {
     throw new Error("limit must be an integer between 1 and 500");
   }
-  const where: string[] = [];
-  const params: unknown[] = [];
-  if (input.status !== undefined) {
-    where.push("status = ?");
-    params.push(input.status);
-  }
-  if (input.createdBy !== undefined) {
-    where.push("created_by = ?");
-    params.push(input.createdBy);
-  }
-  if (input.assignedTo !== undefined) {
-    where.push(
-      `EXISTS (SELECT 1 FROM task_assignments
-         WHERE task_assignments.task_id = tasks.task_id
-           AND task_assignments.agent_id = ?)`,
-    );
-    params.push(input.assignedTo);
-  }
+  const where = taskWhere(input);
   const rows = db
     .prepare(
       `SELECT ${TASK_COLUMNS} FROM tasks
-       ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
+       ${where.sql}
        ORDER BY created_at ASC, rowid ASC LIMIT ?`,
     )
-    .all(...params, limit) as Record<string, unknown>[];
+    .all(...where.params, limit) as Record<string, unknown>[];
   return rows.map(toTask);
 }
 
@@ -193,4 +176,107 @@ export function listTaskAssignees(
     agent_id: row["agent_id"] as string,
     assigned_at: row["assigned_at"] as string,
   }));
+}
+
+/**
+ * Opaque pagination cursor for REST list routes: the rowid of the
+ * last returned row, base64url-encoded. Shared by task lists and
+ * comment pages so the encoding never drifts between surfaces.
+ */
+export function encodeCursor(rowid: number): string {
+  return Buffer.from(`c${rowid}`, "utf8").toString("base64url");
+}
+
+/** Inverse of encodeCursor; throws `invalid_cursor` on tampering. */
+export function decodeCursor(cursor: string): number {
+  const raw = Buffer.from(cursor, "base64url").toString("utf8");
+  if (!raw.startsWith("c")) {
+    throw catalogError("invalid_cursor");
+  }
+  const rowid = Number(raw.slice(1));
+  if (!Number.isInteger(rowid) || rowid < 0) {
+    throw catalogError("invalid_cursor");
+  }
+  return rowid;
+}
+
+/** An Error carrying its catalog code, for HTTP-safe mapping. */
+export function catalogError(code: string): Error & { code: string } {
+  const err = new Error(code) as Error & { code: string };
+  err.code = code;
+  return err;
+}
+
+export interface TaskFilters {
+  status?: string;
+  createdBy?: string;
+  assignedTo?: string;
+}
+
+/** Shared WHERE construction for both list shapes (MCP + REST). */
+function taskWhere(input: TaskFilters): { sql: string; params: unknown[] } {
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (input.status !== undefined) {
+    if (!isTaskStatus(input.status)) {
+      throw new TaskInvalidStatusError(input.status);
+    }
+    where.push("status = ?");
+    params.push(input.status);
+  }
+  if (input.createdBy !== undefined) {
+    where.push("created_by = ?");
+    params.push(input.createdBy);
+  }
+  if (input.assignedTo !== undefined) {
+    where.push(
+      `EXISTS (SELECT 1 FROM task_assignments
+         WHERE task_assignments.task_id = tasks.task_id
+           AND task_assignments.agent_id = ?)`,
+    );
+    params.push(input.assignedTo);
+  }
+  return {
+    sql: where.length > 0 ? `WHERE ${where.join(" AND ")}` : "",
+    params,
+  };
+}
+
+export interface ListTasksPageInput extends TaskFilters {
+  limit?: number;
+  cursor?: string;
+}
+
+/**
+ * Component 18: cursor-paginated task read for the REST surface (the
+ * MCP tool keeps its limit-only contract — no cursor param there, by
+ * design). Same ordering and limits as listTasks; `next_cursor` is
+ * null once the collection is exhausted.
+ */
+export function listTasksPage(
+  db: PolymerDatabase,
+  input: ListTasksPageInput = {},
+): { tasks: Task[]; next_cursor: string | null } {
+  const limit = input.limit ?? 50;
+  if (!Number.isInteger(limit) || limit <= 0 || limit > 500) {
+    throw new Error("limit must be an integer between 1 and 500");
+  }
+  const cursorRowid =
+    input.cursor === undefined ? 0 : decodeCursor(input.cursor);
+  const where = taskWhere(input);
+  const rows = db
+    .prepare(
+      `SELECT rowid AS _rowid, ${TASK_COLUMNS} FROM tasks
+       ${where.sql}${where.sql.length > 0 ? " AND rowid > ?" : " WHERE rowid > ?"}
+       ORDER BY created_at ASC, rowid ASC LIMIT ?`,
+    )
+    .all(...where.params, cursorRowid, limit + 1) as Array<
+    Record<string, unknown> & { _rowid: number }
+  >;
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  return {
+    tasks: page.map(toTask),
+    next_cursor: hasMore ? encodeCursor(page[page.length - 1]._rowid) : null,
+  };
 }

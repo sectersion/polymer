@@ -8,3 +8,4 @@ export * from "./store.js";
 export * from "./lease.js";
 export * from "./mutations.js";
 export * from "./comments.js";
+export * from "./detail.js";
