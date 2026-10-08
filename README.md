@@ -20,7 +20,7 @@ Key ideas: each agent ("monomer") has a fleet-unique name; task leases carry a f
 
 ## Status
 
-Under construction, component by component — components 0–9 of 32 have landed so far: runtime skeleton, health, MCP transport, auth middleware, SQLite, agent table, credential storage, registration, session auth, credential rotation. The normative spec is [`polymer_fleet_management_design_bringup.md`](polymer_fleet_management_design_bringup.md); [`BRINGUP_WORKFLOW.md`](BRINGUP_WORKFLOW.md) defines the one-component-per-commit loop. Human-readable overview: [`HUMANS.md`](HUMANS.md).
+Under construction, component by component — components 0–16 of 32 have landed so far: runtime skeleton, health, MCP transport, auth middleware, SQLite, agent table, credential storage, registration, session auth, credential rotation, task storage and reads, atomic `claim_task`, the shared coordinator-lease fencing guard, task assignment, and coordinator-gated status mutation. The normative spec is [`polymer_fleet_management_design_bringup.md`](polymer_fleet_management_design_bringup.md); [`BRINGUP_WORKFLOW.md`](BRINGUP_WORKFLOW.md) defines the one-component-per-commit loop. Human-readable overview: [`HUMANS.md`](HUMANS.md).
 
 ## Quickstart
 

@@ -1,84 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { MCP_PATH } from "./mcp.js";
 import { listen } from "./server.js";
-import { mintCredential } from "./credentials.js";
 import { getTask } from "./tasks.js";
-
-function tempDbPath(): string {
-  return join(mkdtempSync(join(tmpdir(), "polymer-task-status-")), "test.db");
-}
-
-type App = Awaited<ReturnType<typeof listen>>;
-
-interface AgentSession {
-  agentId: string;
-  token: string;
-}
-
-/** Register agents over real MCP (bootstrap surface). */
-async function registerAgentsOn(
-  app: App,
-  names: string[],
-): Promise<AgentSession[]> {
-  const bootstrap = new Client({ name: "bootstrap", version: "0.0.0" });
-  await bootstrap.connect(
-    new StreamableHTTPClientTransport(new URL(`${app.url}${MCP_PATH}`)),
-  );
-  try {
-    const sessions: AgentSession[] = [];
-    for (const name of names) {
-      const { credential, secret } = mintCredential(app.db!, {
-        type: "init",
-      });
-      const reg = (await bootstrap.callTool({
-        name: "register_agent",
-        arguments: {
-          init_token_id: credential.credential_id,
-          init_token: secret,
-          name,
-          role: "coder",
-        },
-      })) as { structuredContent: Record<string, unknown> };
-      sessions.push({
-        agentId: reg.structuredContent["agent_id"] as string,
-        token: reg.structuredContent["session_token"] as string,
-      });
-    }
-    return sessions;
-  } finally {
-    await bootstrap.close();
-  }
-}
-
-async function withAuthedClients<T>(
-  app: App,
-  tokens: string[],
-  fn: (clients: Client[]) => Promise<T>,
-): Promise<T> {
-  const clients: Client[] = [];
-  for (const token of tokens) {
-    const client = new Client({ name: "test-client", version: "0.0.0" });
-    await client.connect(
-      new StreamableHTTPClientTransport(new URL(`${app.url}${MCP_PATH}`), {
-        requestInit: { headers: { Authorization: `Bearer ${token}` } },
-      }),
-    );
-    clients.push(client);
-  }
-  try {
-    return await fn(clients);
-  } finally {
-    for (const client of clients) {
-      await client.close();
-    }
-  }
-}
+import {
+  registerAgentsOn,
+  tempDbPath,
+  withAuthedClients,
+  type AgentSession,
+  type App,
+} from "./test-support.js";
 
 interface CallOutcome {
   isError?: boolean;
@@ -120,7 +51,9 @@ async function inProgressTask(
 
 describe("update_task_status (component 16)", () => {
   it("concurrent updates race the fence: one lands, stale state is rejected, and done is terminal", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-task-status-"),
+    });
     try {
       const [a, b] = await registerAgentsOn(app, ["agent-a", "agent-b"]);
       const { taskId, version, leaseGeneration } = await inProgressTask(
@@ -207,7 +140,9 @@ describe("update_task_status (component 16)", () => {
   });
 
   it("transitions outside the table are invalid_status and mutate nothing", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-task-status-"),
+    });
     try {
       const [a] = await registerAgentsOn(app, ["agent-a"]);
       const { taskId, version } = await inProgressTask(app, a, "Locked tiger");
@@ -243,7 +178,9 @@ describe("update_task_status (component 16)", () => {
   });
 
   it("a stale expected_version fails without mutation; the fresh write lands", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-task-status-"),
+    });
     try {
       const [a] = await registerAgentsOn(app, ["agent-a"]);
       const { taskId, version } = await inProgressTask(app, a, "Versioned");
@@ -279,7 +216,9 @@ describe("update_task_status (component 16)", () => {
   });
 
   it("a stale lease_generation is rejected through every mutation surface", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-task-status-"),
+    });
     try {
       const [a] = await registerAgentsOn(app, ["agent-a"]);
       const { taskId, version } = await inProgressTask(app, a, "Fenced");
@@ -301,7 +240,9 @@ describe("update_task_status (component 16)", () => {
   });
 
   it("failed -> to_do needs a live lease the entering-failed write just cleared", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-task-status-"),
+    });
     try {
       const [a] = await registerAgentsOn(app, ["agent-a"]);
       const { taskId, version } = await inProgressTask(app, a, "Retry me");
@@ -334,7 +275,9 @@ describe("update_task_status (component 16)", () => {
   });
 
   it("only the coordinator mutates status; a caller-supplied status outside the enum is a schema violation", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-task-status-"),
+    });
     try {
       const [a, b] = await registerAgentsOn(app, ["agent-a", "agent-b"]);
       const { taskId, version } = await inProgressTask(app, a, "Owned");

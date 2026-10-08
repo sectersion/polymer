@@ -1,61 +1,19 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { MCP_PATH } from "./mcp.js";
 import { listen } from "./server.js";
 import { mintCredential } from "./credentials.js";
 import { registerAgent } from "./registration.js";
 import { createTask, getTask } from "./tasks.js";
-
-function tempDbPath(): string {
-  return join(mkdtempSync(join(tmpdir(), "polymer-claim-tasks-")), "test.db");
-}
-
-type App = Awaited<ReturnType<typeof listen>>;
-
-interface AgentSession {
-  agentId: string;
-  token: string;
-}
-
-/** Register a handful of agents over real MCP (bootstrap surface). */
-async function registerAgentsOn(
-  app: App,
-  names: string[],
-): Promise<AgentSession[]> {
-  const bootstrap = new Client({ name: "bootstrap", version: "0.0.0" });
-  await bootstrap.connect(
-    new StreamableHTTPClientTransport(new URL(`${app.url}${MCP_PATH}`)),
-  );
-  try {
-    const sessions: AgentSession[] = [];
-    for (const name of names) {
-      const { credential, secret } = mintCredential(app.db!, {
-        type: "init",
-      });
-      const reg = (await bootstrap.callTool({
-        name: "register_agent",
-        arguments: {
-          init_token_id: credential.credential_id,
-          init_token: secret,
-          name,
-          role: "coder",
-        },
-      })) as { structuredContent: Record<string, unknown> };
-      sessions.push({
-        agentId: reg.structuredContent["agent_id"] as string,
-        token: reg.structuredContent["session_token"] as string,
-      });
-    }
-    return sessions;
-  } finally {
-    await bootstrap.close();
-  }
-}
+import {
+  lapseLeases,
+  registerAgentsOn,
+  tempDbPath,
+  withAuthedClients,
+  type AgentSession,
+  type App,
+} from "./test-support.js";
 
 /**
  * Seed the 100-claimant fleet through the registration service the
@@ -78,31 +36,6 @@ function seedAgents(app: App, names: string[]): AgentSession[] {
   });
 }
 
-/** Attach real MCP clients (own sessions) to an already-listening app. */
-async function withAuthedClients<T>(
-  app: App,
-  tokens: string[],
-  fn: (clients: Client[]) => Promise<T>,
-): Promise<T> {
-  const clients: Client[] = [];
-  for (const token of tokens) {
-    const client = new Client({ name: "test-client", version: "0.0.0" });
-    await client.connect(
-      new StreamableHTTPClientTransport(new URL(`${app.url}${MCP_PATH}`), {
-        requestInit: { headers: { Authorization: `Bearer ${token}` } },
-      }),
-    );
-    clients.push(client);
-  }
-  try {
-    return await fn(clients);
-  } finally {
-    for (const client of clients) {
-      await client.close();
-    }
-  }
-}
-
 interface CallOutcome {
   isError?: boolean;
   structuredContent?: Record<string, unknown>;
@@ -119,18 +52,11 @@ async function callClaim(
   return result;
 }
 
-/** Lapse the lazy-expiry lease: the task becomes claimable. */
-function lapseLeases(app: App): void {
-  app
-    .db!.prepare(
-      "UPDATE tasks SET lease_expires_at = '2000-01-01T00:00:00.000Z'",
-    )
-    .run();
-}
-
 describe("claim_task MCP tool (component 13)", () => {
   it("two agents race for one task: exactly one success, the loser gets task_already_claimed", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-claim-tasks-"),
+    });
     try {
       const [a, b] = await registerAgentsOn(app, ["agent-a", "agent-b"]);
       let taskId = "";
@@ -180,7 +106,7 @@ describe("claim_task MCP tool (component 13)", () => {
       // limit default (100/min per agent and per IP for handshakes) is
       // raised for this fixture only: 101 session handshakes exceed it.
       const app = await listen("127.0.0.1", 0, {
-        databasePath: tempDbPath(),
+        databasePath: tempDbPath("polymer-claim-tasks-"),
         mcpRateLimitPerMin: 1000,
       });
       try {
@@ -254,7 +180,9 @@ describe("claim_task MCP tool (component 13)", () => {
   );
 
   it("own live lease renews: version bumps, generation unchanged, expiry extended", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-claim-tasks-"),
+    });
     try {
       const [a] = await registerAgentsOn(app, ["agent-a"]);
       const created = await withAuthedClients(
@@ -292,7 +220,9 @@ describe("claim_task MCP tool (component 13)", () => {
   });
 
   it("in_progress with an expired lease is reclaimable with a new generation", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-claim-tasks-"),
+    });
     try {
       const [a, b] = await registerAgentsOn(app, ["agent-a", "agent-b"]);
       const created = await withAuthedClients(
@@ -333,7 +263,9 @@ describe("claim_task MCP tool (component 13)", () => {
   });
 
   it("failed with an expired lease recovers into in_progress with a new generation", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-claim-tasks-"),
+    });
     try {
       const [a, b] = await registerAgentsOn(app, ["agent-a", "agent-b"]);
       const task = createTask(app.db!, {
@@ -364,7 +296,9 @@ describe("claim_task MCP tool (component 13)", () => {
   });
 
   it("failed with a live lease held by another agent is task_already_claimed", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-claim-tasks-"),
+    });
     try {
       const [a, b] = await registerAgentsOn(app, ["agent-a", "agent-b"]);
       const task = createTask(app.db!, {
@@ -389,7 +323,9 @@ describe("claim_task MCP tool (component 13)", () => {
   });
 
   it("done is terminal: claim is invalid_status for coordinator and stranger alike", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-claim-tasks-"),
+    });
     try {
       const [a, b] = await registerAgentsOn(app, ["agent-a", "agent-b"]);
       const task = createTask(app.db!, {
@@ -420,7 +356,9 @@ describe("claim_task MCP tool (component 13)", () => {
   });
 
   it("a nonexistent task returns task_not_found", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-claim-tasks-"),
+    });
     try {
       const [a] = await registerAgentsOn(app, ["agent-a"]);
       await withAuthedClients(app, [a.token], async ([client]) => {
@@ -435,7 +373,9 @@ describe("claim_task MCP tool (component 13)", () => {
   });
 
   it("a non-positive lease duration is schema-rejected as invalid params", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-claim-tasks-"),
+    });
     try {
       const [a] = await registerAgentsOn(app, ["agent-a"]);
       await withAuthedClients(app, [a.token], async ([client]) => {
@@ -454,7 +394,9 @@ describe("claim_task MCP tool (component 13)", () => {
   });
 
   it("unauthenticated claims are rejected at the HTTP layer", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-claim-tasks-"),
+    });
     try {
       const res = await fetch(`${app.url}${MCP_PATH}`, {
         method: "POST",

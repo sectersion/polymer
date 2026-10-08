@@ -1,84 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { mkdtempSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { MCP_PATH } from "./mcp.js";
 import { listen } from "./server.js";
-import { mintCredential } from "./credentials.js";
 import { getTask, listTaskAssignees } from "./tasks.js";
-
-function tempDbPath(): string {
-  return join(mkdtempSync(join(tmpdir(), "polymer-assign-")), "test.db");
-}
-
-type App = Awaited<ReturnType<typeof listen>>;
-
-interface AgentSession {
-  agentId: string;
-  token: string;
-}
-
-/** Register agents over real MCP (bootstrap surface). */
-async function registerAgentsOn(
-  app: App,
-  names: string[],
-): Promise<AgentSession[]> {
-  const bootstrap = new Client({ name: "bootstrap", version: "0.0.0" });
-  await bootstrap.connect(
-    new StreamableHTTPClientTransport(new URL(`${app.url}${MCP_PATH}`)),
-  );
-  try {
-    const sessions: AgentSession[] = [];
-    for (const name of names) {
-      const { credential, secret } = mintCredential(app.db!, {
-        type: "init",
-      });
-      const reg = (await bootstrap.callTool({
-        name: "register_agent",
-        arguments: {
-          init_token_id: credential.credential_id,
-          init_token: secret,
-          name,
-          role: "coder",
-        },
-      })) as { structuredContent: Record<string, unknown> };
-      sessions.push({
-        agentId: reg.structuredContent["agent_id"] as string,
-        token: reg.structuredContent["session_token"] as string,
-      });
-    }
-    return sessions;
-  } finally {
-    await bootstrap.close();
-  }
-}
-
-async function withAuthedClients<T>(
-  app: App,
-  tokens: string[],
-  fn: (clients: Client[]) => Promise<T>,
-): Promise<T> {
-  const clients: Client[] = [];
-  for (const token of tokens) {
-    const client = new Client({ name: "test-client", version: "0.0.0" });
-    await client.connect(
-      new StreamableHTTPClientTransport(new URL(`${app.url}${MCP_PATH}`), {
-        requestInit: { headers: { Authorization: `Bearer ${token}` } },
-      }),
-    );
-    clients.push(client);
-  }
-  try {
-    return await fn(clients);
-  } finally {
-    for (const client of clients) {
-      await client.close();
-    }
-  }
-}
+import {
+  lapseLeases,
+  registerAgentsOn,
+  tempDbPath,
+  withAuthedClients,
+  type AgentSession,
+  type App,
+} from "./test-support.js";
 
 interface CallOutcome {
   isError?: boolean;
@@ -110,18 +42,11 @@ async function createTaskAs(
   });
 }
 
-/** Lapse the lazy-expiry lease. */
-function lapseLeases(app: App): void {
-  app
-    .db!.prepare(
-      "UPDATE tasks SET lease_expires_at = '2000-01-01T00:00:00.000Z'",
-    )
-    .run();
-}
-
 describe("task assignment tools (component 15)", () => {
   it("multiple agents attach to a task without corrupting coordinator ownership", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-assign-"),
+    });
     try {
       const [a, b, c] = await registerAgentsOn(app, [
         "agent-a",
@@ -191,7 +116,9 @@ describe("task assignment tools (component 15)", () => {
   });
 
   it("a duplicate assignment is already_assigned and mutates nothing", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-assign-"),
+    });
     try {
       const [a, b] = await registerAgentsOn(app, ["agent-a", "agent-b"]);
       const created = await createTaskAs(app, a, "Dup task");
@@ -224,7 +151,9 @@ describe("task assignment tools (component 15)", () => {
   });
 
   it("a nonexistent target agent is agent_not_found with no partial rows", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-assign-"),
+    });
     try {
       const [a] = await registerAgentsOn(app, ["agent-a"]);
       const created = await createTaskAs(app, a, "Ghost task");
@@ -252,7 +181,9 @@ describe("task assignment tools (component 15)", () => {
   });
 
   it("only the coordinator can assign, even with valid fence values", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-assign-"),
+    });
     try {
       const [a, b] = await registerAgentsOn(app, ["agent-a", "agent-b"]);
       const created = await createTaskAs(app, a, "A's task");
@@ -275,7 +206,9 @@ describe("task assignment tools (component 15)", () => {
   });
 
   it("transfer_coordinator hands off ownership with a new generation, and the old coordinator can no longer write", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-assign-"),
+    });
     try {
       const [a, b, d] = await registerAgentsOn(app, [
         "agent-a",
@@ -351,7 +284,9 @@ describe("task assignment tools (component 15)", () => {
   });
 
   it("transfer to an unassigned registered agent is not_assigned", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-assign-"),
+    });
     try {
       const [a, c] = await registerAgentsOn(app, ["agent-a", "agent-c"]);
       const created = await createTaskAs(app, a, "Loyal task");
@@ -374,7 +309,9 @@ describe("task assignment tools (component 15)", () => {
   });
 
   it("transfer to an unknown agent is agent_not_found", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-assign-"),
+    });
     try {
       const [a] = await registerAgentsOn(app, ["agent-a"]);
       const created = await createTaskAs(app, a, "Nowhere task");
@@ -394,7 +331,9 @@ describe("task assignment tools (component 15)", () => {
   });
 
   it("transfer never recovers an expired lease: the successor reclaims first", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-assign-"),
+    });
     try {
       const [a, b, c] = await registerAgentsOn(app, [
         "agent-a",
@@ -465,7 +404,9 @@ describe("task assignment tools (component 15)", () => {
   });
 
   it("request_unassignment deletes only the caller's row and touches nothing else", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-assign-"),
+    });
     try {
       const [a, b, c] = await registerAgentsOn(app, [
         "agent-a",
@@ -510,7 +451,9 @@ describe("task assignment tools (component 15)", () => {
   });
 
   it("request_unassignment without a row is not_assigned; unknown task is task_not_found", async () => {
-    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-assign-"),
+    });
     try {
       const [a] = await registerAgentsOn(app, ["agent-a"]);
       const created = await createTaskAs(app, a, "Empty task");
