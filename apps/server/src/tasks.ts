@@ -143,12 +143,15 @@ export function getTask(db: PolymerDatabase, taskId: string): Task | undefined {
 export interface ListTasksInput {
   status?: string;
   createdBy?: string;
+  assignedTo?: string;
   limit?: number;
 }
 
 /**
- * Component 10: list tasks, newest last. `limit` defaults to 50 and
- * caps at 500 (mirrors the MCP/REST list conventions).
+ * Component 10 (extended in 12): list tasks, newest last. `limit`
+ * defaults to 50 and caps at 500 (mirrors the MCP/REST list
+ * conventions). `assignedTo` filters to tasks holding an assignment
+ * row for that agent.
  */
 export function listTasks(
   db: PolymerDatabase,
@@ -170,6 +173,14 @@ export function listTasks(
   if (input.createdBy !== undefined) {
     where.push("created_by = ?");
     params.push(input.createdBy);
+  }
+  if (input.assignedTo !== undefined) {
+    where.push(
+      `EXISTS (SELECT 1 FROM task_assignments
+         WHERE task_assignments.task_id = tasks.task_id
+           AND task_assignments.agent_id = ?)`,
+    );
+    params.push(input.assignedTo);
   }
   const rows = db
     .prepare(
