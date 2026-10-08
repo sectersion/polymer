@@ -290,8 +290,8 @@ describe("read task MCP tools (component 12)", () => {
       });
       expect(Object.keys(detail).sort()).toEqual([
         "assigned_to",
-        "coordinator",
         "comments",
+        "coordinator",
         "created_at",
         "created_by",
         "description",
