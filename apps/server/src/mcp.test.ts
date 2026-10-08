@@ -171,6 +171,51 @@ describe("MCP transport (component 2, real session auth)", () => {
     }
   });
 
+  it("oversized MCP bodies are rejected with 413 before any session work", async () => {
+    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    try {
+      const res = await fetch(`${app.url}${MCP_PATH}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-03-26",
+            capabilities: {},
+            clientInfo: { name: "big", version: "0.0.0" },
+            junk: "x".repeat(1024 * 1024 + 1),
+          },
+        }),
+      });
+      expect(res.status).toBe(413);
+      expect(await res.json()).toEqual({ error: "payload_too_large" });
+      // The server still serves a normal request after the rejection.
+      const ok = await fetch(`${app.url}${MCP_PATH}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-03-26",
+            capabilities: {},
+            clientInfo: { name: "small", version: "0.0.0" },
+          },
+        }),
+      });
+      expect(ok.status).toBe(200);
+      await ok.body?.cancel();
+    } finally {
+      await app.close();
+    }
+  });
+
   it("session routing: unknown id 404, missing id 400, terminated session 404", async () => {
     const dbPath = tempDbPath();
     const { sessionToken } = await registerSessionToken(dbPath, "agent-a");

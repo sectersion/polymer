@@ -34,11 +34,13 @@ function jsonResponse(
   res: ServerResponse,
   status: number,
   body: unknown,
+  extraHeaders: Record<string, string> = {},
 ): void {
   const text = JSON.stringify(body);
   res.writeHead(status, {
     "content-type": "application/json",
     "content-length": Buffer.byteLength(text),
+    ...extraHeaders,
   });
   res.end(text);
 }
@@ -61,21 +63,61 @@ function jsonRpcErrorResponse(
   res.end(text);
 }
 
-function readBody(req: IncomingMessage): Promise<unknown | undefined> {
-  return new Promise((resolve, reject) => {
+/** General request body cap: `security.maxMessageSize` (design default 10 MiB). */
+const MAX_REQUEST_BYTES = 10 * 1024 * 1024;
+/**
+ * MCP messages are small (tool args, JSON-RPC): cap them tighter than
+ * the general limit so an unauthenticated stream cannot buffer
+ * megabytes before auth (design parking lot: "MCP request body size
+ * cap ... 1 MiB + 413").
+ */
+const MAX_MCP_MESSAGE_BYTES = 1024 * 1024;
+
+type ReadBodyResult =
+  | { kind: "parsed"; value: unknown }
+  | { kind: "empty" }
+  | { kind: "invalid" }
+  | { kind: "too-large" };
+
+function readBody(
+  req: IncomingMessage,
+  maxBytes: number,
+): Promise<ReadBodyResult> {
+  return new Promise((resolve) => {
     const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => chunks.push(c));
+    let total = 0;
+    let settled = false;
+    const finish = (result: ReadBodyResult): void => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    req.on("data", (c: Buffer) => {
+      total += c.length;
+      if (total > maxBytes) {
+        // Stop buffering immediately; the caller replies 413 and the
+        // connection is closed. Memory stays bounded regardless of how
+        // much the client keeps sending.
+        finish({ kind: "too-large" });
+        return;
+      }
+      chunks.push(c);
+    });
     req.on("end", () => {
-      if (chunks.length === 0) return resolve(undefined);
+      if (settled) return;
       const raw = Buffer.concat(chunks).toString("utf8");
-      if (raw.trim() === "") return resolve(undefined);
+      if (raw.trim() === "") {
+        finish({ kind: "empty" });
+        return;
+      }
       try {
-        resolve(JSON.parse(raw));
+        finish({ kind: "parsed", value: JSON.parse(raw) });
       } catch {
-        resolve(Symbol.for("invalid-json") as unknown as undefined);
+        finish({ kind: "invalid" });
       }
     });
-    req.on("error", reject);
+    // The connection died mid-body; no response can be delivered anyway.
+    req.on("error", () => finish({ kind: "invalid" }));
   });
 }
 
@@ -160,12 +202,21 @@ export async function createPolymerServer(
           });
           return;
         }
-        const body = await readBody(req);
+        const body = await readBody(req, MAX_REQUEST_BYTES);
+        if (body.kind === "too-large") {
+          jsonResponse(
+            res,
+            413,
+            { error: "payload_too_large" },
+            { connection: "close" },
+          );
+          return;
+        }
         if (
-          typeof body !== "object" ||
-          body === null ||
-          Array.isArray(body) ||
-          typeof body === "symbol"
+          body.kind !== "parsed" ||
+          typeof body.value !== "object" ||
+          body.value === null ||
+          Array.isArray(body.value)
         ) {
           jsonResponse(res, 400, { error: "invalid_request" });
           return;
@@ -233,25 +284,37 @@ export async function createPolymerServer(
             extra: { agentId },
           };
         }
-        const body = await readBody(req);
+        const body = await readBody(req, MAX_MCP_MESSAGE_BYTES);
+        if (body.kind === "too-large") {
+          jsonResponse(
+            res,
+            413,
+            { error: "payload_too_large" },
+            { connection: "close" },
+          );
+          return;
+        }
         if (
-          typeof body === "symbol" ||
-          (body !== undefined &&
-            (typeof body !== "object" || body === null || Array.isArray(body)))
+          body.kind === "invalid" ||
+          (body.kind === "parsed" &&
+            (typeof body.value !== "object" ||
+              body.value === null ||
+              Array.isArray(body.value)))
         ) {
           // Malformed MCP request: clean JSON-RPC error, no crash.
           jsonRpcErrorResponse(res, 400, -32700, "Parse error");
           return;
         }
+        const message = body.kind === "parsed" ? body.value : undefined;
         if (agentId === undefined) {
-          if (!isBootstrapCall(body)) {
+          if (!isBootstrapCall(message)) {
             jsonResponse(res, 401, {
               error: "unauthorized",
               reason: "missing",
             });
             return;
           }
-          if (isRegisterAgentCall(body)) {
+          if (isRegisterAgentCall(message)) {
             const ip = req.socket.remoteAddress ?? "unknown";
             if (!initVerifyLimiter.consume(ip)) {
               jsonResponse(res, 429, {
@@ -276,12 +339,12 @@ export async function createPolymerServer(
             jsonRpcErrorResponse(res, 404, -32001, "Session not found");
             return;
           }
-          await existing.handleRequest(req, res, body);
+          await existing.handleRequest(req, res, message);
           return;
         }
-        if (isInitializeCall(body)) {
+        if (isInitializeCall(message)) {
           const sessionTransport = await createSessionTransport();
-          await sessionTransport.handleRequest(req, res, body);
+          await sessionTransport.handleRequest(req, res, message);
           return;
         }
         jsonRpcErrorResponse(
