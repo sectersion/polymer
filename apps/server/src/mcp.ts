@@ -10,17 +10,22 @@ import {
 } from "./registration.js";
 import {
   TaskAgentNotFoundError,
+  TaskAlreadyAssignedError,
   TaskAlreadyClaimedError,
   TaskInvalidStatusError,
+  TaskNotAssignedError,
   TaskNotFoundError,
   TaskUnauthorizedError,
   TaskVersionMismatchError,
+  assignTask,
   claimTask,
   createTask,
   getTask,
   listTaskAssignees,
   listTasks,
+  requestUnassignment,
   testLeaseWrite,
+  transferCoordinator,
   type Task,
 } from "./tasks.js";
 
@@ -61,6 +66,8 @@ function taskToolError(err: unknown): never {
     err instanceof TaskAlreadyClaimedError ||
     err instanceof TaskVersionMismatchError ||
     err instanceof TaskUnauthorizedError ||
+    err instanceof TaskAlreadyAssignedError ||
+    err instanceof TaskNotAssignedError ||
     err instanceof TaskAgentNotFoundError
   ) {
     throw new McpError(ErrorCode.InvalidRequest, err.code);
@@ -374,6 +381,104 @@ export function createMcpServer(
           created_at: task.created_at,
           updated_at: task.updated_at,
         });
+      } catch (err) {
+        taskToolError(err);
+      }
+    },
+  );
+  server.registerTool(
+    "assign_task",
+    {
+      description:
+        "Attach agents to a task (coordinator only, live lease; integer lease_generation and expected_version fence the write; assigns version only, generation unchanged)",
+      inputSchema: {
+        task_id: z.string().min(1),
+        agent_ids: z.array(z.string().min(1)).min(1),
+        lease_generation: z.number().int(),
+        expected_version: z.number().int(),
+      },
+    },
+    async (args, extra) => {
+      if (db === null) {
+        throw new McpError(ErrorCode.InternalError, "database_error");
+      }
+      const caller = callerAgentId(extra);
+      if (caller === undefined) {
+        throw new McpError(ErrorCode.InvalidRequest, "unauthorized");
+      }
+      try {
+        const out = assignTask(
+          db,
+          args.task_id,
+          caller,
+          args.agent_ids,
+          args.lease_generation,
+          args.expected_version,
+        );
+        return toolResult({ ...out });
+      } catch (err) {
+        taskToolError(err);
+      }
+    },
+  );
+  server.registerTool(
+    "transfer_coordinator",
+    {
+      description:
+        "Hand the task to a registered agent assigned to it (coordinator only, live lease; bumps version and lease_generation, renews the lease; the old coordinator's in-flight writes reject on the stale generation)",
+      inputSchema: {
+        task_id: z.string().min(1),
+        new_coordinator_id: z.string().min(1),
+        lease_generation: z.number().int(),
+        expected_version: z.number().int(),
+        lease_duration_seconds: z.number().int().positive().optional(),
+      },
+    },
+    async (args, extra) => {
+      if (db === null) {
+        throw new McpError(ErrorCode.InternalError, "database_error");
+      }
+      const caller = callerAgentId(extra);
+      if (caller === undefined) {
+        throw new McpError(ErrorCode.InvalidRequest, "unauthorized");
+      }
+      try {
+        const out = transferCoordinator(
+          db,
+          args.task_id,
+          caller,
+          args.new_coordinator_id,
+          args.lease_generation,
+          args.expected_version,
+          args.lease_duration_seconds,
+        );
+        return toolResult({ ...out });
+      } catch (err) {
+        taskToolError(err);
+      }
+    },
+  );
+  server.registerTool(
+    "request_unassignment",
+    {
+      description:
+        "Give up your own assignment row on a task (the assigned agent only; touches nothing else)",
+      inputSchema: {
+        task_id: z.string().min(1),
+        reason: z.string().optional(),
+      },
+    },
+    async (args, extra) => {
+      if (db === null) {
+        throw new McpError(ErrorCode.InternalError, "database_error");
+      }
+      const caller = callerAgentId(extra);
+      if (caller === undefined) {
+        throw new McpError(ErrorCode.InvalidRequest, "unauthorized");
+      }
+      try {
+        const out = requestUnassignment(db, args.task_id, caller, args.reason);
+        return toolResult({ ...out });
       } catch (err) {
         taskToolError(err);
       }
