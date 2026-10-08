@@ -19,7 +19,19 @@ export class FixedWindowLimiter {
     private readonly now: () => number = Date.now,
   ) {}
 
-  /** Consume one unit of budget. Returns false when rate-limited. */
+  /** Consume one unit of budget. Returns false when rate-limited.
+   *
+   * Keys whose window has fully elapsed are dead state — keeping them
+   * only serves denial-of-memory — so when the map grows past a
+   * threshold (many distinct IPs/agents), expired keys are pruned
+   * opportunistically on the next new key. */
+  private pruneIfWorthwhile(t: number): void {
+    if (this.perKey.size < 10_000) return;
+    for (const [key, slot] of this.perKey) {
+      if (t - slot.windowStart >= this.windowMs) this.perKey.delete(key);
+    }
+  }
+
   consume(key: string): boolean {
     const t = this.now();
     if (t - this.globalWindowStart >= this.windowMs) {
@@ -29,6 +41,7 @@ export class FixedWindowLimiter {
     if (this.globalCount >= this.globalLimit) return false;
     const slot = this.perKey.get(key);
     if (slot === undefined || t - slot.windowStart >= this.windowMs) {
+      this.pruneIfWorthwhile(t);
       this.perKey.set(key, { windowStart: t, count: 1 });
     } else {
       if (slot.count >= this.perKeyLimit) return false;

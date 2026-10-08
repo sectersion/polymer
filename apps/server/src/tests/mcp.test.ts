@@ -340,6 +340,21 @@ describe("MCP transport (component 2, real session auth)", () => {
     expect(limiter.consume("agent-b")).toBe(true);
   });
 
+  it("unit: expired rate-limit keys are pruned to bound memory", () => {
+    let t = 0;
+    const limiter = new McpLimiter(100, 60_000, () => t);
+    // One fresh key per minute-spaced tick: each consume adds a key.
+    for (let i = 0; i < 10_001; i += 1) {
+      t = i * 61_000;
+      expect(limiter.consume(`ip-${i}`)).toBe(true);
+    }
+    const slots = (limiter as unknown as { perKey: Map<string, unknown> })
+      .perKey;
+    // The 10_001st new key crossed the pruning threshold: everything
+    // older than the window was dropped.
+    expect(slots.size).toBe(1);
+  });
+
   it("authenticated MCP requests are limited per agent with retry_after", async () => {
     const dbPath = tempDbPath();
     const { sessionToken } = await registerSessionToken(dbPath, "agent-a");
@@ -466,7 +481,7 @@ describe("MCP transport (component 2, real session auth)", () => {
     const app = await listen("127.0.0.1", 0, {
       databasePath: tempDbPath(),
       mcpMaxSessions: 2,
-      mcpSessionIdleMs: 300,
+      mcpSessionIdleMs: 500,
     });
     try {
       const first = await rawInitialize(app.url);
@@ -491,9 +506,10 @@ describe("MCP transport (component 2, real session auth)", () => {
       expect(touch.status).not.toBe(404);
       await touch.body?.cancel();
 
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      // sid2 is now idle ~400 ms (>300) and sid1 ~200 ms (<300): the
-      // handshake below sweeps sid2 only, landing under the cap.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      // sid2 is now idle ~600 ms (well past the 500 ms TTL) and sid1
+      // ~400 ms — ~100 ms of margin on each side: the handshake below
+      // sweeps sid2 only, landing under the cap.
       const third = await rawInitialize(app.url);
       expect(third.status).toBe(200);
       await third.body?.cancel();
