@@ -37,8 +37,8 @@ export function registerAgentTools(
       inputSchema: {
         init_token_id: z.string(),
         init_token: z.string(),
-        name: z.string(),
-        role: z.string(),
+        name: z.string().min(1).max(64),
+        role: z.string().min(1).max(96),
         heartbeat_timeout_seconds: heartbeatSchema,
       },
     },
@@ -69,8 +69,8 @@ export function registerAgentTools(
       description:
         "Spawn a subagent; the server sets parent_agent_id to the caller (session auth only)",
       inputSchema: {
-        name: z.string(),
-        role: z.string(),
+        name: z.string().min(1).max(64),
+        role: z.string().min(1).max(96),
         heartbeat_timeout_seconds: heartbeatSchema,
       },
     },

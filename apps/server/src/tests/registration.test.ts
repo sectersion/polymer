@@ -68,6 +68,41 @@ async function callToolError(
 }
 
 describe("Agent registration (component 7)", () => {
+  it("name and role inputs are length-capped at the schema (no unbounded rows)", async () => {
+    // Round-2 security audit: unhalted fanout wrote rows bounded only
+    // by the 1 MiB body cap. Registration tool inputs now carry the
+    // constraints: name 64, role 96 — violations answer -32602.
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath(),
+    });
+    const client = await anonClient(app.url);
+    try {
+      const { credential, secret } = mintCredential(app.db!, {
+        type: "init",
+      });
+      for (const args of [
+        {
+          init_token_id: credential.credential_id,
+          init_token: secret,
+          name: "a".repeat(65),
+          role: "coder",
+        },
+        {
+          init_token_id: credential.credential_id,
+          init_token: secret,
+          name: "toolongrole",
+          role: "r".repeat(97),
+        },
+      ]) {
+        const error = await callRegisterError(client, args);
+        expect(error).toContain("-32602");
+      }
+    } finally {
+      await client.close();
+      await app.close();
+    }
+  });
+
   it("new agent bootstraps over real MCP; plaintext never persisted", async () => {
     // Each client gets its own server, all sharing one SQLite file
     // (the fleet view); servers accept many sessions now (mcp.test.ts).
