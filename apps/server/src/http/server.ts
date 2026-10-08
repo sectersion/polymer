@@ -231,6 +231,8 @@ export async function createPolymerServer(
   };
 
   const server = createServer(async (req, res) => {
+    const method = req.method ?? "";
+    const rawPath = (req.url ?? "/").split("?")[0];
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
       const path = url.pathname;
@@ -351,8 +353,6 @@ export async function createPolymerServer(
           (req as IncomingMessage & { auth?: unknown }).auth = {
             token,
             clientId: agentId,
-            scopes: [],
-            expiresAt: Math.floor(Date.now() / 1000) + 3600,
             extra: { agentId },
           };
         }
@@ -460,7 +460,18 @@ export async function createPolymerServer(
       }
 
       jsonResponse(res, 404, { error: "not_found" });
-    } catch {
+    } catch (err) {
+      // Never swallow a crash: log server side (identifiers only, no
+      // request bodies or credentials) and answer catalog-style 500.
+      console.error(
+        JSON.stringify({
+          event: "request_error",
+          method,
+          path: rawPath,
+          at: new Date().toISOString(),
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
       if (!res.headersSent) {
         jsonResponse(res, 500, { error: "internal_error" });
       } else {

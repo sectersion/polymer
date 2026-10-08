@@ -38,43 +38,58 @@ function main(): void {
 
   console.log(buildStartupMessage(host, port));
 
-  void import("./http/server.js").then(async ({ createPolymerServer }) => {
-    const { resolveDatabasePath, getSchemaVersion, closeDatabase } =
-      await import("./database/db.js");
-    const dbPath = resolveDatabasePath();
-    const { server, db, closeSessions } = await createPolymerServer({
-      databasePath: dbPath,
-    });
-    server.listen(port, host, () => {
-      console.log(`polymer server ready on ${host}:${port}`);
-      if (db) {
-        console.log(
-          `polymer database ${dbPath} at schema version ${getSchemaVersion(db)}`,
-        );
-      }
-    });
+  void import("./http/server.js")
+    .then(async ({ createPolymerServer }) => {
+      const { resolveDatabasePath, getSchemaVersion, closeDatabase } =
+        await import("./database/db.js");
+      const dbPath = resolveDatabasePath();
+      const { server, db, closeSessions } = await createPolymerServer({
+        databasePath: dbPath,
+      });
+      server.listen(port, host, () => {
+        console.log(`polymer server ready on ${host}:${port}`);
+        if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1") {
+          // Design: TLS is required for remote agent communication, but
+          // the MVP server speaks plaintext. Do not let an operator
+          // publish plaintext beyond loopback silently.
+          console.warn(
+            `polymer server listening on ${host}:${port} with plaintext HTTP: TLS is required before exposing beyond loopback`,
+          );
+        }
+        if (db) {
+          console.log(
+            `polymer database ${dbPath} at schema version ${getSchemaVersion(db)}`,
+          );
+        }
+      });
 
-    const shutdown = (signal: string) => {
-      console.log(`polymer server received ${signal}, shutting down cleanly`);
-      void closeSessions()
-        .catch(() => {
-          // Sessions already closed; still shut the server down.
-        })
-        .finally(() => {
-          server.close(() => {
-            try {
-              if (db) closeDatabase(db);
-            } finally {
-              process.exit(0);
-            }
+      const shutdown = (signal: string) => {
+        console.log(`polymer server received ${signal}, shutting down cleanly`);
+        void closeSessions()
+          .catch(() => {
+            // Sessions already closed; still shut the server down.
+          })
+          .finally(() => {
+            server.close(() => {
+              try {
+                if (db) closeDatabase(db);
+              } finally {
+                process.exit(0);
+              }
+            });
           });
-        });
-      setTimeout(() => process.exit(0), 1000).unref();
-    };
+        setTimeout(() => process.exit(0), 1000).unref();
+      };
 
-    process.on("SIGINT", () => shutdown("SIGINT"));
-    process.on("SIGTERM", () => shutdown("SIGTERM"));
-  });
+      process.on("SIGINT", () => shutdown("SIGINT"));
+      process.on("SIGTERM", () => shutdown("SIGTERM"));
+    })
+    .catch((err: unknown) => {
+      // Startup must never fail silently: log the failure to stderr and
+      // exit non-zero (no secret material in the error path).
+      console.error("polymer server failed to start:", err);
+      process.exitCode = 1;
+    });
 }
 
 const invokedDirectly =
