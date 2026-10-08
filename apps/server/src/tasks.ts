@@ -627,3 +627,81 @@ export function requestUnassignment(
         : `unassigned: ${reason.trim()}`,
   };
 }
+
+export interface TaskStatusMutationResult {
+  task_id: string;
+  status: TaskStatus;
+  version: number;
+  updated_at: string;
+}
+
+/**
+ * Component 16: coordinator-only status mutation through the guard.
+ * The MCP transition table (force lives on the REST admin surface
+ * only):
+ *
+ *     to_do -> in_progress   claim_task/admin-claim only (never update)
+ *     in_progress -> done    allowed (clears the lease)
+ *     in_progress -> failed  allowed (clears the lease)
+ *     failed -> to_do        live lease required (guard provides it)
+ *     failed -> in_progress  claim_task reclaim only
+ *     done -> *              TERMINAL — never reaches the table
+ *
+ * Entering done/failed clears the lease (`lease_expires_at = NULL`):
+ * generation is unchanged — clearing leaves the ownership epoch alone;
+ * recovery to a working epoch goes through claim_task. Everything not
+ * listed is `invalid_status`; guard failures surface as
+ * `unauthorized` / `version_mismatch` before the table is consulted.
+ */
+export function updateTaskStatus(
+  db: PolymerDatabase,
+  taskId: string,
+  caller: string,
+  status: TaskStatus,
+  leaseGeneration: number,
+  expectedVersion: number,
+): TaskStatusMutationResult {
+  const allowedTransitions: Partial<Record<TaskStatus, TaskStatus[]>> = {
+    in_progress: ["done", "failed"],
+    failed: ["to_do"],
+  };
+  const write = db.transaction(() => {
+    const task = assertCoordinatorLease(
+      db,
+      taskId,
+      caller,
+      leaseGeneration,
+      expectedVersion,
+    );
+    if (!(allowedTransitions[task.status] ?? []).includes(status)) {
+      throw new TaskInvalidStatusError(status);
+    }
+    const version = task.version + 1;
+    const now = new Date().toISOString();
+    const clearsLease = status === "done" || status === "failed";
+    const updated = db
+      .prepare(
+        `UPDATE tasks SET status = ?, version = ?,
+            lease_expires_at = ?, updated_at = ?
+          WHERE task_id = ? AND version = ?`,
+      )
+      .run(
+        status,
+        version,
+        clearsLease ? null : task.lease_expires_at,
+        now,
+        task.task_id,
+        task.version,
+      );
+    if (updated.changes !== 1) {
+      throw new TaskVersionMismatchError(task.task_id);
+    }
+    return {
+      task_id: task.task_id,
+      status,
+      version,
+      updated_at: now,
+    };
+  });
+  return write.immediate();
+}

@@ -24,8 +24,10 @@ import {
   listTaskAssignees,
   listTasks,
   requestUnassignment,
+  TASK_STATUSES,
   testLeaseWrite,
   transferCoordinator,
+  updateTaskStatus,
   type Task,
 } from "./tasks.js";
 
@@ -478,6 +480,41 @@ export function createMcpServer(
       }
       try {
         const out = requestUnassignment(db, args.task_id, caller, args.reason);
+        return toolResult({ ...out });
+      } catch (err) {
+        taskToolError(err);
+      }
+    },
+  );
+  server.registerTool(
+    "update_task_status",
+    {
+      description:
+        "Coordinator-only status transition through the lease guard (integer lease_generation and expected_version fence the write): in_progress -> done|failed clears the lease, failed -> to_do requeues, to_do and failed -> in_progress go through claim_task, done is terminal",
+      inputSchema: {
+        task_id: z.string().min(1),
+        status: z.enum(TASK_STATUSES),
+        lease_generation: z.number().int(),
+        expected_version: z.number().int(),
+      },
+    },
+    async (args, extra) => {
+      if (db === null) {
+        throw new McpError(ErrorCode.InternalError, "database_error");
+      }
+      const caller = callerAgentId(extra);
+      if (caller === undefined) {
+        throw new McpError(ErrorCode.InvalidRequest, "unauthorized");
+      }
+      try {
+        const out = updateTaskStatus(
+          db,
+          args.task_id,
+          caller,
+          args.status,
+          args.lease_generation,
+          args.expected_version,
+        );
         return toolResult({ ...out });
       } catch (err) {
         taskToolError(err);
