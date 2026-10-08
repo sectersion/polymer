@@ -126,20 +126,35 @@ describe("read task MCP tools (component 12)", () => {
       });
     });
 
-    // Fixture seeds: A-1 moves to in_progress; B-1 is assigned to A.
+    // Fixture seeds: A-1 is claimed by its creator (to_do -> in_progress
+    // is claim-only: version+1, generation+1, live lease) and B-1 is
+    // assigned by its coordinator (assign bumps version only). Mirrors
+    // components 13/18 effects so the seeded rows stay spec-reachable.
     const seedApp = await listen("127.0.0.1", 0, { databasePath: dbPath });
     try {
+      const now = new Date().toISOString();
       seedApp
         .db!.prepare(
-          "UPDATE tasks SET status = 'in_progress' WHERE title = 'A-1'",
+          `UPDATE tasks
+              SET status = 'in_progress',
+                  version = version + 1,
+                  lease_generation = lease_generation + 1,
+                  lease_expires_at = ?,
+                  updated_at = ?
+            WHERE title = 'A-1'`,
         )
-        .run();
+        .run(new Date(Date.now() + 3_600_000).toISOString(), now);
       seedApp
         .db!.prepare(
           `INSERT INTO task_assignments (task_id, agent_id)
            SELECT task_id, ? FROM tasks WHERE title = 'B-1'`,
         )
         .run(agentA.agentId);
+      seedApp
+        .db!.prepare(
+          "UPDATE tasks SET version = version + 1, updated_at = ? WHERE title = 'B-1'",
+        )
+        .run(now);
     } finally {
       await seedApp.close();
     }
@@ -220,7 +235,8 @@ describe("read task MCP tools (component 12)", () => {
       });
     });
 
-    // Seed an assignment so assigned_to is observable in detail.
+    // Seed an assignment (coordinator-assigned: bumps version only,
+    // generation unchanged) so assigned_to is observable in detail.
     const seedApp = await listen("127.0.0.1", 0, { databasePath: dbPath });
     try {
       seedApp
@@ -228,6 +244,11 @@ describe("read task MCP tools (component 12)", () => {
           "INSERT INTO task_assignments (task_id, agent_id) VALUES (?, ?)",
         )
         .run(created!["task_id"] as string, agentB.agentId);
+      seedApp
+        .db!.prepare(
+          "UPDATE tasks SET version = version + 1, updated_at = ? WHERE task_id = ?",
+        )
+        .run(new Date().toISOString(), created!["task_id"] as string);
     } finally {
       await seedApp.close();
     }
@@ -242,7 +263,7 @@ describe("read task MCP tools (component 12)", () => {
         title: "Detail task",
         description: "full detail",
         status: "to_do",
-        version: 1,
+        version: 2,
         created_by: agentA.agentId,
         coordinator: agentA.agentId,
         lease_generation: 1,
