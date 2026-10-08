@@ -34,6 +34,15 @@ export interface PolymerServerOptions {
   /** Hard cap on concurrent MCP sessions — a backstop behind the
    * per-IP handshake budget. Beyond it, `initialize` gets 429. */
   mcpMaxSessions?: number;
+  /** Idle age past which a session becomes eligible for eviction.
+   * Swept only under capacity pressure (at the cap), so below-cap
+   * deployments never evict a connected-but-quiet client. */
+  mcpSessionIdleMs?: number;
+}
+
+interface McpSession {
+  transport: StreamableHTTPServerTransport;
+  lastUsedAt: number;
 }
 
 function jsonResponse(
@@ -141,6 +150,7 @@ export async function createPolymerServer(
   // handshake is keyed by source IP. Session cap bounds total growth.
   const mcpLimiter = new McpLimiter(options.mcpRateLimitPerMin ?? 100);
   const maxSessions = options.mcpMaxSessions ?? 1000;
+  const sessionIdleMs = options.mcpSessionIdleMs ?? 30 * 60_000;
   // One transport + McpServer per MCP client session. The stateful
   // transport accepts exactly one `initialize` for its lifetime, so a
   // single shared instance would let the first client — even an
@@ -149,14 +159,17 @@ export async function createPolymerServer(
   // option: it forbids the session ids the agent-facing protocol needs.
   // Sessions are keyed by the SDK-generated id and removed on session
   // DELETE (`onsessionclosed`) or server shutdown.
-  const sessions = new Map<string, StreamableHTTPServerTransport>();
+  const sessions = new Map<string, McpSession>();
 
   async function createSessionTransport(): Promise<StreamableHTTPServerTransport> {
     const sessionServer = createMcpServer(db);
     const sessionTransport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (sessionId) => {
-        sessions.set(sessionId, sessionTransport);
+        sessions.set(sessionId, {
+          transport: sessionTransport,
+          lastUsedAt: Date.now(),
+        });
       },
       onsessionclosed: (sessionId) => {
         sessions.delete(sessionId);
@@ -166,10 +179,37 @@ export async function createPolymerServer(
     return sessionTransport;
   }
 
+  /** Drop sessions idle past the TTL. Called only at the cap, so a
+   * stale fill cannot become a permanent initialize wedge: the next
+   * handshake under pressure clears dead sessions before rejecting. */
+  const sweepIdleSessions = (): void => {
+    const cutoff = Date.now() - sessionIdleMs;
+    for (const [sessionId, session] of sessions) {
+      if (session.lastUsedAt <= cutoff) {
+        sessions.delete(sessionId);
+        void session.transport.close().catch(() => {
+          // Already closed; eviction is best-effort.
+        });
+      }
+    }
+  };
+
+  /** Seconds until the oldest session becomes sweep-eligible: an
+   * honest `retry_after` for cap-exhaustion 429s (a fixed 60 would
+   * promise a retry that cannot succeed while the cap stays full). */
+  const nextSessionExpiryInSeconds = (): number => {
+    let oldest = Number.POSITIVE_INFINITY;
+    for (const session of sessions.values()) {
+      oldest = Math.min(oldest, session.lastUsedAt);
+    }
+    if (!Number.isFinite(oldest)) return 60;
+    return Math.max(1, Math.ceil((oldest + sessionIdleMs - Date.now()) / 1000));
+  };
+
   const closeSessions = async (): Promise<void> => {
-    for (const sessionTransport of sessions.values()) {
+    for (const session of sessions.values()) {
       try {
-        await sessionTransport.close();
+        await session.transport.close();
       } catch {
         // Session already closed; keep shutting the rest down.
       }
@@ -378,14 +418,18 @@ export async function createPolymerServer(
             jsonRpcErrorResponse(res, 404, -32001, "Session not found");
             return;
           }
-          await existing.handleRequest(req, res, message);
+          existing.lastUsedAt = Date.now();
+          await existing.transport.handleRequest(req, res, message);
           return;
         }
         if (isInitializeCall(message)) {
+          // Sweep before the cap check: dead sessions free their slots
+          // instead of stacking up against the reject path.
+          sweepIdleSessions();
           if (sessions.size >= maxSessions) {
             jsonResponse(res, 429, {
               error: "rate_limit_exceeded",
-              retry_after: 60,
+              retry_after: nextSessionExpiryInSeconds(),
             });
             return;
           }

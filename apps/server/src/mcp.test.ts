@@ -415,10 +415,15 @@ describe("MCP transport (component 2, real session auth)", () => {
 
       const rejected = await rawInitialize(app.url, auth);
       expect(rejected.status).toBe(429);
-      expect(await rejected.json()).toEqual({
-        error: "rate_limit_exceeded",
-        retry_after: 60,
-      });
+      const capBody = (await rejected.json()) as {
+        error?: string;
+        retry_after?: number;
+      };
+      expect(capBody.error).toBe("rate_limit_exceeded");
+      // Cap 429s advertise the real wait: seconds until the oldest
+      // session becomes sweep-eligible (default idle TTL 30 min).
+      expect(capBody.retry_after).toBeGreaterThanOrEqual(1);
+      expect(capBody.retry_after).toBeLessThanOrEqual(1800);
 
       // The live session is unaffected by the cap.
       const ok = await rawPing(app.url, {
@@ -427,6 +432,95 @@ describe("MCP transport (component 2, real session auth)", () => {
       });
       expect(ok.status).toBe(200);
       await ok.body?.cancel();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("stale sessions are swept at the cap instead of wedging it", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath(),
+      mcpMaxSessions: 2,
+      mcpSessionIdleMs: 1,
+    });
+    try {
+      for (let i = 0; i < 2; i += 1) {
+        const res = await rawInitialize(app.url);
+        expect(res.status).toBe(200);
+        await res.body?.cancel();
+      }
+      // At the cap now; after the 1 ms idle TTL everything is
+      // sweep-eligible, so a third handshake is admitted instead of
+      // hitting a permanent 429.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const third = await rawInitialize(app.url);
+      expect(third.status).toBe(200);
+      expect(third.headers.get("mcp-session-id")).toBeTruthy();
+      await third.body?.cancel();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("the sweep frees expired sessions and keeps recently used ones", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath(),
+      mcpMaxSessions: 2,
+      mcpSessionIdleMs: 300,
+    });
+    try {
+      const first = await rawInitialize(app.url);
+      const sid1 = first.headers.get("mcp-session-id")!;
+      await first.body?.cancel();
+      const second = await rawInitialize(app.url);
+      const sid2 = second.headers.get("mcp-session-id")!;
+      await second.body?.cancel();
+
+      // Age both sessions, then keep sid1 alive with a routed
+      // (bootstrap-permitted) notification.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const touch = await fetch(`${app.url}${MCP_PATH}`, {
+        method: "POST",
+        headers: { ...mcpHeaders(), "mcp-session-id": sid1 },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "notifications/initialized",
+          params: {},
+        }),
+      });
+      expect(touch.status).not.toBe(404);
+      await touch.body?.cancel();
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      // sid2 is now idle ~400 ms (>300) and sid1 ~200 ms (<300): the
+      // handshake below sweeps sid2 only, landing under the cap.
+      const third = await rawInitialize(app.url);
+      expect(third.status).toBe(200);
+      await third.body?.cancel();
+
+      const live = await fetch(`${app.url}${MCP_PATH}`, {
+        method: "POST",
+        headers: { ...mcpHeaders(), "mcp-session-id": sid1 },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "notifications/initialized",
+          params: {},
+        }),
+      });
+      expect(live.status).not.toBe(404);
+      await live.body?.cancel();
+
+      const dead = await fetch(`${app.url}${MCP_PATH}`, {
+        method: "POST",
+        headers: { ...mcpHeaders(), "mcp-session-id": sid2 },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "notifications/initialized",
+          params: {},
+        }),
+      });
+      expect(dead.status).toBe(404);
+      await dead.body?.cancel();
     } finally {
       await app.close();
     }
