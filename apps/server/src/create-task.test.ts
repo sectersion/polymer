@@ -126,7 +126,7 @@ describe("create_task MCP tool (component 11)", () => {
         ],
         [
           "agent-b",
-          (id: string, tok: string) => {
+          (id: string) => {
             agentB = id;
           },
         ],
