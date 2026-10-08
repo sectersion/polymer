@@ -10,7 +10,11 @@ import {
 } from "./registration.js";
 import {
   TaskAgentNotFoundError,
+  TaskAlreadyClaimedError,
   TaskInvalidStatusError,
+  TaskNotFoundError,
+  TaskVersionMismatchError,
+  claimTask,
   createTask,
   getTask,
   listTaskAssignees,
@@ -47,8 +51,13 @@ type ToolBody = {
 
 function taskToolError(err: unknown): never {
   if (err instanceof McpError) throw err;
+  if (err instanceof TaskInvalidStatusError) {
+    throw new McpError(ErrorCode.InvalidRequest, err.code);
+  }
   if (
-    err instanceof TaskInvalidStatusError ||
+    err instanceof TaskNotFoundError ||
+    err instanceof TaskAlreadyClaimedError ||
+    err instanceof TaskVersionMismatchError ||
     err instanceof TaskAgentNotFoundError
   ) {
     throw new McpError(ErrorCode.InvalidRequest, err.code);
@@ -214,6 +223,37 @@ export function createMcpServer(db: PolymerDatabase | null = null): McpServer {
           trace_parent: task.trace_parent,
           created_at: task.created_at,
         });
+      } catch (err) {
+        taskToolError(err);
+      }
+    },
+  );
+  server.registerTool(
+    "claim_task",
+    {
+      description:
+        "Atomically claim a task: become its coordinator with a live lease (session auth only). Renewing your own live lease keeps the generation; acquiring from unleased/expired starts a new one",
+      inputSchema: {
+        task_id: z.string().min(1),
+        lease_duration_seconds: z.number().int().positive().optional(),
+      },
+    },
+    async (args, extra) => {
+      if (db === null) {
+        throw new McpError(ErrorCode.InternalError, "database_error");
+      }
+      const caller = callerAgentId(extra);
+      if (caller === undefined) {
+        throw new McpError(ErrorCode.InvalidRequest, "unauthorized");
+      }
+      try {
+        const out = claimTask(
+          db,
+          args.task_id,
+          caller,
+          args.lease_duration_seconds,
+        );
+        return toolResult({ ...out });
       } catch (err) {
         taskToolError(err);
       }
