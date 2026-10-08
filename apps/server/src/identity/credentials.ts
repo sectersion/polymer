@@ -125,6 +125,10 @@ function toCredential(row: Record<string, unknown>): Credential {
 const RETURNING = `credential_id, public_id, type, token_hash, agent_id,
   status, created_at, expires_at, last_used_at, rotated_from_credential_id`;
 
+/** Design `auth.initTokenExpiry`: a minted init OTP is single-use and
+ * lives 10 minutes unless the mint is given an explicit expiry. */
+export const INIT_TOKEN_DEFAULT_TTL_SECONDS = 600;
+
 /**
  * Component 6: mint a credential, storing only the hash.
  * Returns the row plus the plaintext secret (once — never persisted).
@@ -147,6 +151,13 @@ export function mintCredential(
       ? `${publicId}.${rawSecret}`
       : rawSecret;
   const tokenHash = hashForType(input.type, secret);
+  const expiresAt =
+    input.expiresAt ??
+    (input.type === "init"
+      ? new Date(
+          Date.now() + INIT_TOKEN_DEFAULT_TTL_SECONDS * 1000,
+        ).toISOString()
+      : null);
   const row = db
     .prepare(
       `INSERT INTO credentials
@@ -160,7 +171,7 @@ export function mintCredential(
       input.type,
       tokenHash,
       input.agentId ?? null,
-      input.expiresAt ?? null,
+      expiresAt,
     ) as Record<string, unknown>;
   return { credential: toCredential(row), secret };
 }

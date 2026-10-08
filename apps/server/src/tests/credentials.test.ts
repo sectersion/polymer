@@ -51,6 +51,20 @@ describe("Credential storage (component 6)", () => {
     }
   });
 
+  it("minted init OTPs expire by default (auth.initTokenExpiry: 600)", () => {
+    const db = openTestDb();
+    const before = Date.now();
+    const init = mintCredential(db, { type: "init" });
+    const session = mintCredential(db, { type: "agent_session" });
+    // Init tokens live 10 minutes by default; other credential types
+    // are not born expiry-bound.
+    const deltaSeconds =
+      (Date.parse(init.credential.expires_at!) - before) / 1000;
+    expect(deltaSeconds).toBeGreaterThanOrEqual(599);
+    expect(deltaSeconds).toBeLessThanOrEqual(601);
+    expect(session.credential.expires_at).toBeNull();
+  });
+
   it("init and master rows store scrypt/PHC, machine rows store SHA-256", () => {
     const db = openTestDb();
     const init = mintCredential(db, { type: "init" });
