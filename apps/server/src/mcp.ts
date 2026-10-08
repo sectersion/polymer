@@ -47,7 +47,10 @@ type ToolBody = {
 
 function taskToolError(err: unknown): never {
   if (err instanceof McpError) throw err;
-  if (err instanceof TaskInvalidStatusError) {
+  if (
+    err instanceof TaskInvalidStatusError ||
+    err instanceof TaskAgentNotFoundError
+  ) {
     throw new McpError(ErrorCode.InvalidRequest, err.code);
   }
   // Driver failures are server-side: catalog maps database_error → 503.
@@ -175,7 +178,10 @@ export function createMcpServer(db: PolymerDatabase | null = null): McpServer {
       description:
         "Create a task; the authenticated caller becomes creator and coordinator (session auth only)",
       inputSchema: {
-        title: z.string().min(1),
+        title: z
+          .string()
+          .min(1)
+          .refine((s) => s.trim().length > 0, "title must not be empty"),
         description: z.string().optional(),
         trace_parent: z.string().optional(),
       },
@@ -209,13 +215,7 @@ export function createMcpServer(db: PolymerDatabase | null = null): McpServer {
           created_at: task.created_at,
         });
       } catch (err) {
-        if (err instanceof TaskAgentNotFoundError) {
-          throw new McpError(ErrorCode.InvalidRequest, err.code);
-        }
-        if (err instanceof Error) {
-          throw new McpError(ErrorCode.InvalidRequest, err.message);
-        }
-        throw err;
+        taskToolError(err);
       }
     },
   );
@@ -228,7 +228,7 @@ export function createMcpServer(db: PolymerDatabase | null = null): McpServer {
         status: z.string().optional(),
         created_by: z.string().optional(),
         assigned_to: z.string().optional(),
-        limit: z.number().int().optional(),
+        limit: z.number().int().min(1).max(500).optional(),
       },
     },
     async (args, extra) => {

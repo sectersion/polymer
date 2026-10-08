@@ -155,7 +155,10 @@ describe("Session authentication on ping (component 8)", () => {
 
       const missing = await ping();
       expect(missing.status).toBe(401);
-      await missing.body?.cancel();
+      expect(await missing.json()).toEqual({
+        error: "invalid_token",
+        reason: "missing",
+      });
 
       for (const bad of [
         "deadbeef.0123456789abcdef0123456789abcdef0123456789abcdef012345",
@@ -163,7 +166,10 @@ describe("Session authentication on ping (component 8)", () => {
       ]) {
         const res = await ping(bad);
         expect(res.status).toBe(401);
-        await res.body?.cancel();
+        expect(await res.json()).toEqual({
+          error: "invalid_token",
+          reason: "invalid",
+        });
       }
 
       // Expire the session credential server-side: it must stop working.
@@ -174,7 +180,10 @@ describe("Session authentication on ping (component 8)", () => {
         .run();
       const expired = await ping(a.sessionToken);
       expect(expired.status).toBe(401);
-      await expired.body?.cancel();
+      expect(await expired.json()).toEqual({
+        error: "invalid_token",
+        reason: "invalid",
+      });
     } finally {
       await app.close();
     }
@@ -212,7 +221,10 @@ describe("Session authentication on ping (component 8)", () => {
         }),
       });
       expect(res.status).toBe(401);
-      await res.body?.cancel();
+      expect(await res.json()).toEqual({
+        error: "invalid_token",
+        reason: "invalid",
+      });
     } finally {
       await app.close();
     }
@@ -235,7 +247,9 @@ describe("Session authentication on ping (component 8)", () => {
         }),
       });
       expect(res.status).toBe(401);
-      await res.body?.cancel();
+      expect(((await res.json()) as { error?: string }).error).toBe(
+        "invalid_token",
+      );
       const health = await fetch(`${app.url}/health`);
       expect(health.status).toBe(200);
       await health.body?.cancel();

@@ -323,13 +323,16 @@ describe("read task MCP tools (component 12)", () => {
       expect(badStatus.isError).toBe(true);
       expect(JSON.stringify(badStatus)).toContain("invalid_status");
 
+      // Out-of-range limits are schema violations: the SDK reports
+      // JSON-RPC -32602 before the handler runs (the service check
+      // stays as defense for direct callers).
       for (const limit of [0, 501]) {
         const badLimit = (await client.callTool({
           name: "get_tasks",
           arguments: { limit },
         })) as { isError?: boolean };
         expect(badLimit.isError).toBe(true);
-        expect(JSON.stringify(badLimit)).toContain("limit");
+        expect(JSON.stringify(badLimit)).toContain("-32602");
       }
     });
   });

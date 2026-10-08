@@ -251,6 +251,12 @@ export async function createPolymerServer(
             jsonResponse(res, 401, { error: err.code });
             return;
           }
+          if (err instanceof Error && err.name === "SqliteError") {
+            // Driver failure during rotation: catalog maps
+            // database_error to 503, not a bare 500.
+            jsonResponse(res, 503, { error: "database_error" });
+            return;
+          }
           throw err;
         }
         return;
@@ -279,8 +285,11 @@ export async function createPolymerServer(
         if (token !== undefined && db) {
           const session = verifySessionToken(db, token);
           if (!session.ok) {
+            // Catalog: invalid_token is the 401 code for a missing or
+            // unknown/wrong credential (unauthorized is the 403 code
+            // for an authenticated-but-not-permitted caller).
             jsonResponse(res, 401, {
-              error: "unauthorized",
+              error: "invalid_token",
               reason: "invalid",
             });
             return;
@@ -319,7 +328,7 @@ export async function createPolymerServer(
         if (agentId === undefined) {
           if (!isBootstrapCall(message)) {
             jsonResponse(res, 401, {
-              error: "unauthorized",
+              error: "invalid_token",
               reason: "missing",
             });
             return;

@@ -195,4 +195,81 @@ describe("create_task MCP tool (component 11)", () => {
       await app.close();
     }
   });
+
+  it("database failures surface as database_error without SQL leakage", async () => {
+    const dbPath = tempDbPath();
+    const app = await listen("127.0.0.1", 0, { databasePath: dbPath });
+    const bootstrap = new Client({ name: "bootstrap", version: "0.0.0" });
+    await bootstrap.connect(
+      new StreamableHTTPClientTransport(new URL(`${app.url}${MCP_PATH}`)),
+    );
+    let sessionToken = "";
+    try {
+      const { credential, secret } = mintCredential(app.db!, { type: "init" });
+      const reg = (await bootstrap.callTool({
+        name: "register_agent",
+        arguments: {
+          init_token_id: credential.credential_id,
+          init_token: secret,
+          name: "agent-a",
+          role: "coder",
+        },
+      })) as { structuredContent: Record<string, unknown> };
+      sessionToken = reg.structuredContent["session_token"] as string;
+      // Break the schema between requests: create_task's INSERT now
+      // throws a better-sqlite3 SqliteError.
+      app.db!.prepare("DROP TABLE tasks").run();
+    } finally {
+      await bootstrap.close();
+      await app.close();
+    }
+
+    await withClient(dbPath, sessionToken, async (client) => {
+      const result = (await client.callTool({
+        name: "create_task",
+        arguments: { title: "Doomed task" },
+      })) as { isError?: boolean };
+      expect(result.isError).toBe(true);
+      const text = JSON.stringify(result);
+      expect(text).toContain("database_error");
+      expect(text).not.toMatch(/SQLITE|no such table/i);
+    });
+  });
+
+  it("blank titles are schema-rejected as invalid params", async () => {
+    const dbPath = tempDbPath();
+    const app = await listen("127.0.0.1", 0, { databasePath: dbPath });
+    const bootstrap = new Client({ name: "bootstrap", version: "0.0.0" });
+    await bootstrap.connect(
+      new StreamableHTTPClientTransport(new URL(`${app.url}${MCP_PATH}`)),
+    );
+    let sessionToken = "";
+    try {
+      const { credential, secret } = mintCredential(app.db!, { type: "init" });
+      const reg = (await bootstrap.callTool({
+        name: "register_agent",
+        arguments: {
+          init_token_id: credential.credential_id,
+          init_token: secret,
+          name: "agent-a",
+          role: "coder",
+        },
+      })) as { structuredContent: Record<string, unknown> };
+      sessionToken = reg.structuredContent["session_token"] as string;
+    } finally {
+      await bootstrap.close();
+      await app.close();
+    }
+
+    await withClient(dbPath, sessionToken, async (client) => {
+      for (const title of ["", "   "]) {
+        const result = (await client.callTool({
+          name: "create_task",
+          arguments: { title },
+        })) as { isError?: boolean };
+        expect(result.isError).toBe(true);
+        expect(JSON.stringify(result)).toContain("-32602");
+      }
+    });
+  });
 });

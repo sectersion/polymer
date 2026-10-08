@@ -268,6 +268,20 @@ describe("Reconnect credential rotation (component 9)", () => {
     }
   });
 
+  it("driver failures surface as 503 database_error", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath(),
+    });
+    try {
+      app.db!.prepare("DROP TABLE credentials").run();
+      const res = await postRefresh(app.url, "deadbeef.cafe");
+      expect(res.status).toBe(503);
+      expect(res.json["error"]).toBe("database_error");
+    } finally {
+      await app.close();
+    }
+  });
+
   it("unit: refresh limiter budgets (5 per credential, 60 global)", () => {
     const limiter = new RefreshLimiter();
     for (let i = 0; i < 5; i++) expect(limiter.consume("cred-a")).toBe(true);
