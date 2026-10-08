@@ -426,6 +426,120 @@ describe("comments and mentions (component 17)", () => {
     }
   });
 
+  it("output key pins: comment/ping/page shapes match their contracts exactly", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-comments-"),
+    });
+    try {
+      const [a, b] = await registerAgentsOn(app, ["agent-a", "agent-b"]);
+      const created = await withAuthedClients(
+        app,
+        [a.token],
+        async ([client]) => {
+          const task = await callTool(client, "create_task", {
+            title: "Pins",
+          });
+          return task.structuredContent!;
+        },
+      );
+      const taskId = created["task_id"] as string;
+      const comment = await withAuthedClients(
+        app,
+        [a.token],
+        async ([client]) => {
+          const posted = await callTool(client, "post_comment", {
+            task_id: taskId,
+            content: "@agent-b ping",
+          });
+          return posted.structuredContent!;
+        },
+      );
+      // Comment object: the contract's 6 keys (mentions array included).
+      expect(Object.keys(comment).sort()).toEqual([
+        "comment_id",
+        "content",
+        "created_at",
+        "mentions",
+        "sender_agent_id",
+        "task_id",
+        "trace_parent",
+      ]);
+
+      await withAuthedClients(app, [b.token], async ([client]) => {
+        const unread = await callTool(client, "get_unread_pings", {});
+        const pings = unread.structuredContent!["pings"] as Array<
+          Record<string, unknown>
+        >;
+        expect(Object.keys(pings[0]).sort()).toEqual([
+          "comment_id",
+          "content",
+          "created_at",
+          "mention_id",
+          "sender_agent_id",
+          "task_id",
+        ]);
+
+        const page = await callTool(client, "get_comments", {
+          task_id: taskId,
+        });
+        const body = page.structuredContent!;
+        expect(Object.keys(body).sort()).toEqual(["comments", "next_cursor"]);
+        const first = (body["comments"] as Array<Record<string, unknown>>)[0];
+        expect(Object.keys(first).sort()).toEqual([
+          "comment_id",
+          "content",
+          "created_at",
+          "sender_agent_id",
+          "sender_type",
+          "task_id",
+          "trace_parent",
+        ]);
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("a garbage or ambiguous cursor is invalid_cursor, unparsable content never panics", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-comments-"),
+    });
+    try {
+      const [a] = await registerAgentsOn(app, ["agent-a"]);
+      const created = await withAuthedClients(
+        app,
+        [a.token],
+        async ([client]) => {
+          const task = await callTool(client, "create_task", {
+            title: "Cursor",
+          });
+          const taskId = task.structuredContent!["task_id"] as string;
+          await callTool(client, "post_comment", {
+            task_id: taskId,
+            content: "first",
+          });
+          return taskId;
+        },
+      );
+      await withAuthedClients(app, [a.token], async ([client]) => {
+        for (const cursor of [
+          "garbage",
+          Buffer.from("junk").toString("base64url"),
+        ]) {
+          const bad = await callTool(client, "get_comments", {
+            task_id: created,
+            cursor,
+          });
+          expect(bad.isError, JSON.stringify(bad)).toBe(true);
+          // Catalog extension code, to be registered at component 18.
+          expect(JSON.stringify(bad)).toContain("invalid_cursor");
+        }
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it("unauthenticated comment tools are rejected at the HTTP layer", async () => {
     const app = await listen("127.0.0.1", 0, {
       databasePath: tempDbPath("polymer-comments-"),

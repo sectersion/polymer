@@ -94,8 +94,8 @@ export function postComment(
     db.prepare(
       `INSERT INTO comments
          (comment_id, task_id, sender_agent_id, sender_type, content, trace_parent, created_at)
-       VALUES (?, ?, ?, 'agent', ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
-    ).run(commentId, taskId, senderAgentId, content, traceParent ?? null);
+       VALUES (?, ?, ?, 'agent', ?, ?, ?)`,
+    ).run(commentId, taskId, senderAgentId, content, traceParent ?? null, now);
     const mentions = resolveMentions(db, content);
     for (const mentionedAgentId of mentions) {
       db.prepare(

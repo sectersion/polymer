@@ -180,6 +180,22 @@ describe("read task MCP tools (component 12)", () => {
         expect([agentA.agentId, agentB.agentId]).toContain(task["created_by"]);
         expect(task["coordinator"]).toBe(task["created_by"]);
       }
+      // Exact key pins: list items and detail match their contracts
+      // with nothing extra and nothing missing.
+      const listed = allTasks.find((t) => t["title"] === "A-1")!;
+      expect(Object.keys(listed).sort()).toEqual([
+        "assigned_to",
+        "coordinator",
+        "created_at",
+        "created_by",
+        "lease_expires_at",
+        "lease_generation",
+        "status",
+        "task_id",
+        "title",
+        "trace_parent",
+        "version",
+      ]);
       expect(
         allTasks.find((t) => t["title"] === "B-1")!["assigned_to"],
       ).toEqual([agentA.agentId]);
@@ -272,6 +288,23 @@ describe("read task MCP tools (component 12)", () => {
         comments: [],
         has_more: false,
       });
+      expect(Object.keys(detail).sort()).toEqual([
+        "assigned_to",
+        "coordinator",
+        "comments",
+        "created_at",
+        "created_by",
+        "description",
+        "has_more",
+        "lease_expires_at",
+        "lease_generation",
+        "status",
+        "task_id",
+        "title",
+        "trace_parent",
+        "updated_at",
+        "version",
+      ]);
       expect(typeof detail["lease_expires_at"]).toBe("string");
       expect(typeof detail["created_at"]).toBe("string");
       expect(typeof detail["updated_at"]).toBe("string");
