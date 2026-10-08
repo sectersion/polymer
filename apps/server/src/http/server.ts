@@ -54,6 +54,11 @@ export interface PolymerServerOptions {
 interface McpSession {
   transport: StreamableHTTPServerTransport;
   lastUsedAt: number;
+  /** The agent bound to this session at creation, when the
+   * initialize carried a valid Bearer credential. Anonymous
+   * (bootstrap) sessions are unbound and can only ever receive the
+   * unauthenticated surface. */
+  ownerAgentId: string | undefined;
 }
 
 function jsonResponse(
@@ -172,7 +177,9 @@ export async function createPolymerServer(
   // DELETE (`onsessionclosed`) or server shutdown.
   const sessions = new Map<string, McpSession>();
 
-  async function createSessionTransport(): Promise<StreamableHTTPServerTransport> {
+  async function createSessionTransport(
+    ownerAgentId: string | undefined,
+  ): Promise<StreamableHTTPServerTransport> {
     const sessionServer = createMcpServer(db, {
       testSeams: options.testSeams ?? false,
     });
@@ -182,6 +189,7 @@ export async function createPolymerServer(
         sessions.set(sessionId, {
           transport: sessionTransport,
           lastUsedAt: Date.now(),
+          ownerAgentId,
         });
       },
       onsessionclosed: (sessionId) => {
@@ -432,6 +440,19 @@ export async function createPolymerServer(
             jsonRpcErrorResponse(res, 404, -32001, "Session not found");
             return;
           }
+          // A session created with a valid credential belongs to that
+          // agent only: another principal's token (or an anonymous
+          // caller) driving a foreign session gets 403 — the catalog
+          // "authenticated but not permitted" — while bootstrap
+          // sessions stay unbound because anonymous clients must be
+          // able to complete register_agent on them.
+          if (
+            existing.ownerAgentId !== undefined &&
+            existing.ownerAgentId !== agentId
+          ) {
+            jsonResponse(res, 403, { error: "unauthorized" });
+            return;
+          }
           // Only authenticated traffic extends session life: a
           // legitimate agent is back within the idle TTL the moment
           // it calls a tool, while keep-alive-spamming bootstrap
@@ -453,7 +474,7 @@ export async function createPolymerServer(
             });
             return;
           }
-          const sessionTransport = await createSessionTransport();
+          const sessionTransport = await createSessionTransport(agentId);
           await sessionTransport.handleRequest(req, res, message);
           return;
         }

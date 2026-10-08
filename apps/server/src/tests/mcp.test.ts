@@ -489,6 +489,42 @@ describe("MCP transport (component 2, real session auth)", () => {
     }
   });
 
+  it("a session is bound to the agent whose credential created it", async () => {
+    const dbPath = tempDbPath();
+    const a = await registerSessionToken(dbPath, "agent-a");
+    const b = await registerSessionToken(dbPath, "agent-b");
+    const app = await listen("127.0.0.1", 0, { databasePath: dbPath });
+    try {
+      const init = await rawInitialize(app.url, mcpHeaders(a.sessionToken));
+      expect(init.status).toBe(200);
+      const sid = init.headers.get("mcp-session-id")!;
+      await init.body?.cancel();
+
+      // Another agent's credential cannot drive A's session.
+      const foreign = await rawPing(app.url, {
+        ...mcpHeaders(b.sessionToken),
+        "mcp-session-id": sid,
+      });
+      expect(foreign.status).toBe(403);
+      expect(await foreign.json()).toEqual({ error: "unauthorized" });
+
+      // An anonymous caller never gets past the auth layer at all.
+      const anon = await rawPing(app.url, { "mcp-session-id": sid });
+      expect(anon.status).toBe(401);
+      await anon.body?.cancel();
+
+      // The owner keeps working.
+      const own = await rawPing(app.url, {
+        ...mcpHeaders(a.sessionToken),
+        "mcp-session-id": sid,
+      });
+      expect(own.status).toBe(200);
+      await own.body?.cancel();
+    } finally {
+      await app.close();
+    }
+  });
+
   it("stale sessions are swept at the cap instead of wedging it", async () => {
     const app = await listen("127.0.0.1", 0, {
       databasePath: tempDbPath(),
