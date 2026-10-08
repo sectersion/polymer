@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listen } from "./server.js";
+import { listen } from "../http/server.js";
 
 describe("HTTP health (component 1)", () => {
   it("GET /health returns { ok: true }", async () => {

@@ -1,8 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import type { PolymerDatabase } from "../db.js";
-import { registerAgent, registerSubagent } from "../registration.js";
+import type { PolymerDatabase } from "../database/db.js";
+import { registerAgent, registerSubagent } from "../identity/registration.js";
 import {
   callerAgentId,
   heartbeatSchema,

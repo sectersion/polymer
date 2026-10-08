@@ -4,7 +4,7 @@ import {
   DEFAULT_HOST,
   DEFAULT_PORT,
   VERSION,
-} from "./index.js";
+} from "../index.js";
 
 describe("server skeleton", () => {
   it("exposes a version", () => {

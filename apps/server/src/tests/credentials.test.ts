@@ -2,7 +2,11 @@ import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { closeDatabase, openDatabase, type PolymerDatabase } from "./db.js";
+import {
+  closeDatabase,
+  openDatabase,
+  type PolymerDatabase,
+} from "../database/db.js";
 import {
   generateInitOtp,
   generateMachineSecret,
@@ -14,7 +18,7 @@ import {
   sha256Hex,
   verifyCredential,
   verifyScrypt,
-} from "./credentials.js";
+} from "../identity/credentials.js";
 
 const openHandles: PolymerDatabase[] = [];
 

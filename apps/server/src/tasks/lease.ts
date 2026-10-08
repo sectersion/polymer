@@ -1,4 +1,4 @@
-import type { PolymerDatabase } from "../db.js";
+import type { PolymerDatabase } from "../database/db.js";
 import { TASK_LEASE_DEFAULT_SECONDS, getTask, type Task } from "./store.js";
 import {
   TaskAlreadyClaimedError,

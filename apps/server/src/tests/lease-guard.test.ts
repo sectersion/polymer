@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { listen } from "./server.js";
-import { getTask } from "./tasks.js";
+import { listen } from "../http/server.js";
+import { getTask } from "../tasks/index.js";
 import {
   lapseLeases,
   registerAgentsOn,

@@ -6,7 +6,7 @@ import {
   scryptSync,
   timingSafeEqual,
 } from "node:crypto";
-import type { PolymerDatabase } from "./db.js";
+import type { PolymerDatabase } from "../database/db.js";
 
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const RECONNECT_TTL_MS = 30 * 24 * 60 * 60 * 1000;

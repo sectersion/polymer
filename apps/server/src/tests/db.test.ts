@@ -13,8 +13,8 @@ import {
   openDatabase,
   resolveDatabasePath,
   type PolymerDatabase,
-} from "./db.js";
-import { listen } from "./server.js";
+} from "../database/db.js";
+import { listen } from "../http/server.js";
 
 const openHandles: PolymerDatabase[] = [];
 

@@ -1,6 +1,6 @@
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { RegistrationError } from "../registration.js";
+import { RegistrationError } from "../identity/registration.js";
 import {
   TaskAgentNotFoundError,
   TaskAlreadyAssignedError,
@@ -11,7 +11,7 @@ import {
   TaskUnauthorizedError,
   TaskVersionMismatchError,
   type Task,
-} from "../tasks.js";
+} from "../tasks/index.js";
 
 export const heartbeatSchema = z.number().int().positive().optional();
 

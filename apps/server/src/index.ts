@@ -38,9 +38,9 @@ function main(): void {
 
   console.log(buildStartupMessage(host, port));
 
-  void import("./server.js").then(async ({ createPolymerServer }) => {
+  void import("./http/server.js").then(async ({ createPolymerServer }) => {
     const { resolveDatabasePath, getSchemaVersion, closeDatabase } =
-      await import("./db.js");
+      await import("./database/db.js");
     const dbPath = resolveDatabasePath();
     const { server, db, closeSessions } = await createPolymerServer({
       databasePath: dbPath,

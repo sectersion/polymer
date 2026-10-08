@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { MCP_PATH } from "./mcp.js";
-import { listen } from "./server.js";
-import { mintCredential } from "./credentials.js";
-import { registerAgent } from "./registration.js";
-import { createTask, getTask } from "./tasks.js";
+import { MCP_PATH } from "../mcp/index.js";
+import { listen } from "../http/server.js";
+import { mintCredential } from "../identity/credentials.js";
+import { registerAgent } from "../identity/registration.js";
+import { createTask, getTask } from "../tasks/index.js";
 import {
   lapseLeases,
   registerAgentsOn,

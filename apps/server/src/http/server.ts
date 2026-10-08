@@ -6,15 +6,23 @@ import {
 } from "node:http";
 import { randomUUID } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { MCP_PATH, createMcpServer } from "./mcp.js";
-import { extractBearerToken } from "./auth.js";
+import { MCP_PATH, createMcpServer } from "../mcp/index.js";
+import { extractBearerToken } from "../identity/auth.js";
 import {
   RefreshError,
   refreshReconnect,
   verifySessionToken,
-} from "./credentials.js";
-import { InitVerifyLimiter, McpLimiter, RefreshLimiter } from "./rate-limit.js";
-import { closeDatabase, openDatabase, type PolymerDatabase } from "./db.js";
+} from "../identity/credentials.js";
+import {
+  InitVerifyLimiter,
+  McpLimiter,
+  RefreshLimiter,
+} from "../identity/rate-limit.js";
+import {
+  closeDatabase,
+  openDatabase,
+  type PolymerDatabase,
+} from "../database/db.js";
 
 export const HEALTH_PATH = "/health";
 

@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { MCP_PATH } from "./mcp.js";
-import { mintCredential } from "./credentials.js";
-import { listen } from "./server.js";
+import { MCP_PATH } from "../mcp/index.js";
+import { mintCredential } from "../identity/credentials.js";
+import { listen } from "../http/server.js";
 
 export type App = Awaited<ReturnType<typeof listen>>;
 

@@ -1,8 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import type { PolymerDatabase } from "../db.js";
-import { testLeaseWrite } from "../tasks.js";
+import type { PolymerDatabase } from "../database/db.js";
+import { testLeaseWrite } from "../tasks/index.js";
 import { callerAgentId, taskToolError, toolResult } from "./shared.js";
 
 export function registerProbeTool(

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { PolymerDatabase } from "./db.js";
+import type { PolymerDatabase } from "../database/db.js";
 
 export const AGENT_STATUSES = [
   "connecting",

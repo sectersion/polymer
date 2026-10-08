@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { MCP_PATH } from "./mcp.js";
-import { listen } from "./server.js";
-import { mintCredential } from "./credentials.js";
-import { getAgentById } from "./agents.js";
-import { InitVerifyLimiter } from "./rate-limit.js";
+import { MCP_PATH } from "../mcp/index.js";
+import { listen } from "../http/server.js";
+import { mintCredential } from "../identity/credentials.js";
+import { getAgentById } from "../identity/agents.js";
+import { InitVerifyLimiter } from "../identity/rate-limit.js";
 
 function tempDbPath(): string {
   return join(mkdtempSync(join(tmpdir(), "polymer-reg-")), "test.db");

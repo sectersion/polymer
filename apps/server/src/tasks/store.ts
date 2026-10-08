@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { getAgentById } from "../agents.js";
-import type { PolymerDatabase } from "../db.js";
+import { getAgentById } from "../identity/agents.js";
+import type { PolymerDatabase } from "../database/db.js";
 import { TaskAgentNotFoundError, TaskInvalidStatusError } from "./errors.js";
 
 export const TASK_STATUSES = [

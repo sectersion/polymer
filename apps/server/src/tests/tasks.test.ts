@@ -2,9 +2,14 @@ import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { createAgent } from "./agents.js";
-import { closeDatabase, openDatabase } from "./db.js";
-import { createTask, getTask, listTaskAssignees, listTasks } from "./tasks.js";
+import { createAgent } from "../identity/agents.js";
+import { closeDatabase, openDatabase } from "../database/db.js";
+import {
+  createTask,
+  getTask,
+  listTaskAssignees,
+  listTasks,
+} from "../tasks/index.js";
 
 function tempDbPath(): string {
   return join(mkdtempSync(join(tmpdir(), "polymer-tasks-")), "test.db");

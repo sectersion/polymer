@@ -8,7 +8,7 @@ import {
   getSchemaVersion,
   openDatabase,
   type PolymerDatabase,
-} from "./db.js";
+} from "../database/db.js";
 import {
   AgentNameTakenError,
   AgentNotFoundError,
@@ -17,7 +17,7 @@ import {
   heartbeatAgent,
   listAgents,
   updateAgentStatus,
-} from "./agents.js";
+} from "../identity/agents.js";
 
 const openHandles: PolymerDatabase[] = [];
 

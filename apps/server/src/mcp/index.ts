@@ -1,9 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { VERSION } from "./index.js";
-import type { PolymerDatabase } from "./db.js";
-import { registerAgentTools } from "./mcp/agent-tools.js";
-import { registerProbeTool } from "./mcp/probe.js";
-import { registerTaskTools } from "./mcp/task-tools.js";
+import { VERSION } from "../index.js";
+import type { PolymerDatabase } from "../database/db.js";
+import { registerAgentTools } from "./agent-tools.js";
+import { registerProbeTool } from "./probe.js";
+import { registerTaskTools } from "./task-tools.js";
 
 export const MCP_PATH = "/mcp";
 

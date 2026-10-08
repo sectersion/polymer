@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import type { PolymerDatabase } from "../db.js";
+import type { PolymerDatabase } from "../database/db.js";
 import {
   TASK_STATUSES,
   assignTask,
@@ -13,7 +13,7 @@ import {
   requestUnassignment,
   transferCoordinator,
   updateTaskStatus,
-} from "../tasks.js";
+} from "../tasks/index.js";
 import {
   callerAgentId,
   taskListItem,

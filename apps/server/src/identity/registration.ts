@@ -5,7 +5,7 @@ import {
   mintCredential,
   verifyScrypt,
 } from "./credentials.js";
-import type { PolymerDatabase } from "./db.js";
+import type { PolymerDatabase } from "../database/db.js";
 
 export interface RegisterAgentInput {
   initTokenId: string;
