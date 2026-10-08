@@ -481,7 +481,7 @@ describe("MCP transport (component 2, real session auth)", () => {
     const app = await listen("127.0.0.1", 0, {
       databasePath: tempDbPath(),
       mcpMaxSessions: 2,
-      mcpSessionIdleMs: 500,
+      mcpSessionIdleMs: 1200,
     });
     try {
       const first = await rawInitialize(app.url);
@@ -493,7 +493,7 @@ describe("MCP transport (component 2, real session auth)", () => {
 
       // Age both sessions, then keep sid1 alive with a routed
       // (bootstrap-permitted) notification.
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 600));
       const touch = await fetch(`${app.url}${MCP_PATH}`, {
         method: "POST",
         headers: { ...mcpHeaders(), "mcp-session-id": sid1 },
@@ -506,10 +506,10 @@ describe("MCP transport (component 2, real session auth)", () => {
       expect(touch.status).not.toBe(404);
       await touch.body?.cancel();
 
-      await new Promise((resolve) => setTimeout(resolve, 400));
-      // sid2 is now idle ~600 ms (well past the 500 ms TTL) and sid1
-      // ~400 ms — ~100 ms of margin on each side: the handshake below
-      // sweeps sid2 only, landing under the cap.
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      // sid2 is now idle ~1400 ms (well past the 1200 ms TTL) and sid1
+      // ~600 ms — ≥200 ms of drift margin on each side: the handshake
+      // below sweeps sid2 only, landing under the cap.
       const third = await rawInitialize(app.url);
       expect(third.status).toBe(200);
       await third.body?.cancel();
