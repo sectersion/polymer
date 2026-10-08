@@ -10,6 +10,7 @@ import {
   TaskNotFoundError,
   TaskUnauthorizedError,
   TaskVersionMismatchError,
+  PingNotFoundError,
   type Task,
 } from "../tasks/index.js";
 
@@ -33,9 +34,9 @@ type ToolBody = {
     | string
     | number
     | boolean
-    | string[]
     | null
-    | ReadonlyArray<Record<string, unknown>>;
+    | ReadonlyArray<unknown>
+    | Record<string, unknown>;
 };
 
 export function taskToolError(err: unknown): never {
@@ -50,6 +51,7 @@ export function taskToolError(err: unknown): never {
     err instanceof TaskUnauthorizedError ||
     err instanceof TaskAlreadyAssignedError ||
     err instanceof TaskNotAssignedError ||
+    err instanceof PingNotFoundError ||
     err instanceof TaskAgentNotFoundError
   ) {
     throw new McpError(ErrorCode.InvalidRequest, err.code);

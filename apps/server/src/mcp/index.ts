@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { VERSION } from "../index.js";
 import type { PolymerDatabase } from "../database/db.js";
 import { registerAgentTools } from "./agent-tools.js";
+import { registerCommentTools } from "./comment-tools.js";
 import { registerProbeTool } from "./probe.js";
 import { registerTaskTools } from "./task-tools.js";
 
@@ -31,6 +32,7 @@ export function createMcpServer(
   const server = new McpServer({ name: "polymer", version: VERSION });
   registerAgentTools(server, db);
   registerTaskTools(server, db);
+  registerCommentTools(server, db);
   if (options.testSeams) {
     registerProbeTool(server, db);
   }

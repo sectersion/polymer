@@ -3,11 +3,13 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { PolymerDatabase } from "../database/db.js";
 import {
+  DETAIL_EMBEDDED_COMMENTS,
   TASK_STATUSES,
   assignTask,
   claimTask,
   createTask,
   getTask,
+  latestComments,
   listTaskAssignees,
   listTasks,
   requestUnassignment,
@@ -166,8 +168,8 @@ export function registerTaskTools(
         throw new McpError(ErrorCode.InvalidRequest, "unauthorized");
       }
       try {
-        // One read transaction: task + assignees from a single
-        // snapshot (see get_tasks).
+        // One read transaction: task + assignees + the embedded
+        // comment window all come from a single snapshot.
         const detail = db.transaction(() => {
           const task = getTask(db, args.task_id);
           if (task === undefined) return undefined;
@@ -176,12 +178,17 @@ export function registerTaskTools(
             assigneeIds: listTaskAssignees(db, task.task_id).map(
               (a) => a.agent_id,
             ),
+            comments: latestComments(
+              db,
+              task.task_id,
+              DETAIL_EMBEDDED_COMMENTS,
+            ),
           };
         })();
         if (detail === undefined) {
           throw new McpError(ErrorCode.InvalidRequest, "task_not_found");
         }
-        const { task, assigneeIds } = detail;
+        const { task, assigneeIds, comments } = detail;
         return toolResult({
           task_id: task.task_id,
           title: task.title,
@@ -194,9 +201,8 @@ export function registerTaskTools(
           lease_expires_at: task.lease_expires_at,
           trace_parent: task.trace_parent,
           assigned_to: assigneeIds,
-          // Comments arrive with component 17; shape is spec-stable now.
-          comments: [],
-          has_more: false,
+          comments: comments.comments,
+          has_more: comments.has_more,
           created_at: task.created_at,
           updated_at: task.updated_at,
         });

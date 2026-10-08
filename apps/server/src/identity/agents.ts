@@ -142,6 +142,21 @@ export function getAgentById(
   return row === undefined ? undefined : toAgent(row);
 }
 
+/** Exact, case-sensitive name lookup (the mention-resolution key). */
+export function getAgentByName(
+  db: PolymerDatabase,
+  name: string,
+): Agent | undefined {
+  const row = db
+    .prepare(
+      `SELECT agent_id, name, role, parent_agent_id, status,
+              heartbeat_timeout_seconds, last_seen, connected_at, created_at
+       FROM agents WHERE name = ?`,
+    )
+    .get(name) as Record<string, unknown> | undefined;
+  return row === undefined ? undefined : toAgent(row);
+}
+
 export function listAgents(db: PolymerDatabase): Agent[] {
   const rows = db
     .prepare(

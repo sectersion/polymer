@@ -93,6 +93,31 @@ CREATE TABLE task_assignments (
     down: `DROP TABLE IF EXISTS task_assignments;
 DROP TABLE IF EXISTS tasks;`,
   },
+  {
+    version: 5,
+    name: "005_comments",
+    up: `CREATE TABLE comments (
+  comment_id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(task_id),
+  sender_agent_id TEXT NULL REFERENCES agents(agent_id),
+  sender_type TEXT NOT NULL DEFAULT 'agent'
+    CHECK(sender_type IN ('agent', 'human')),
+  content TEXT NOT NULL,
+  trace_parent TEXT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_comments_task ON comments(task_id);
+CREATE TABLE mentions (
+  mention_id TEXT PRIMARY KEY,
+  comment_id TEXT NOT NULL REFERENCES comments(comment_id),
+  mentioned_agent_id TEXT NOT NULL REFERENCES agents(agent_id),
+  read INTEGER NOT NULL DEFAULT 0 CHECK(read IN (0, 1)),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_mentions_agent ON mentions(mentioned_agent_id, read);`,
+    down: `DROP TABLE IF EXISTS mentions;
+DROP TABLE IF EXISTS comments;`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
