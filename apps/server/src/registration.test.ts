@@ -69,8 +69,8 @@ async function callToolError(
 
 describe("Agent registration (component 7)", () => {
   it("new agent bootstraps over real MCP; plaintext never persisted", async () => {
-    // One MCP server accepts one transport session: each client gets its
-    // own server, all sharing one SQLite file (the fleet view).
+    // Each client gets its own server, all sharing one SQLite file
+    // (the fleet view); servers accept many sessions now (mcp.test.ts).
     const dbPath = tempDbPath();
     const app = await listen("127.0.0.1", 0, { databasePath: dbPath });
     const client = await anonClient(app.url);

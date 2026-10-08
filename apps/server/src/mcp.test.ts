@@ -101,4 +101,150 @@ describe("MCP transport (component 2, real session auth)", () => {
       await app.close();
     }
   });
+
+  it("every initialize gets its own session: no single-session wedge", async () => {
+    // Regression: one shared transport accepted exactly one initialize
+    // for the process lifetime, so the first client (even anonymous)
+    // permanently blocked every other agent.
+    const app = await listen("127.0.0.1", 0, { databasePath: tempDbPath() });
+    try {
+      const sessionIds: Array<string | null> = [];
+      for (let i = 0; i < 2; i += 1) {
+        const res = await fetch(`${app.url}${MCP_PATH}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: {
+              protocolVersion: "2025-03-26",
+              capabilities: {},
+              clientInfo: { name: `client-${i}`, version: "0.0.0" },
+            },
+          }),
+        });
+        expect(res.status).toBe(200);
+        sessionIds.push(res.headers.get("mcp-session-id"));
+        await res.body?.cancel();
+      }
+      expect(sessionIds[0]).toBeTruthy();
+      expect(sessionIds[1]).toBeTruthy();
+      expect(sessionIds[1]).not.toBe(sessionIds[0]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("two agents run concurrently on one server with their own identities and fleet view", async () => {
+    const dbPath = tempDbPath();
+    const agentA = await registerSessionToken(dbPath, "agent-a");
+    const agentB = await registerSessionToken(dbPath, "agent-b");
+    const app = await listen("127.0.0.1", 0, { databasePath: dbPath });
+    const clientA = await connect(app.url, agentA.sessionToken);
+    const clientB = await connect(app.url, agentB.sessionToken);
+    try {
+      const pingA = (await clientA.callTool({ name: "ping", arguments: {} }))
+        .structuredContent;
+      expect(pingA).toEqual({ ok: true, agent_id: agentA.agentId });
+      const pingB = (await clientB.callTool({ name: "ping", arguments: {} }))
+        .structuredContent;
+      expect(pingB).toEqual({ ok: true, agent_id: agentB.agentId });
+
+      // Fleet flow on a single production server: A writes, B reads.
+      await clientA.callTool({
+        name: "create_task",
+        arguments: { title: "A writes, B reads" },
+      });
+      const list = await clientB.callTool({
+        name: "get_tasks",
+        arguments: {},
+      });
+      expect(JSON.stringify(list)).toContain("A writes, B reads");
+    } finally {
+      await clientA.close();
+      await clientB.close();
+      await app.close();
+    }
+  });
+
+  it("session routing: unknown id 404, missing id 400, terminated session 404", async () => {
+    const dbPath = tempDbPath();
+    const { sessionToken } = await registerSessionToken(dbPath, "agent-a");
+    const app = await listen("127.0.0.1", 0, { databasePath: dbPath });
+    try {
+      const headers = {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        Authorization: `Bearer ${sessionToken}`,
+      };
+      const init = await fetch(`${app.url}${MCP_PATH}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-03-26",
+            capabilities: {},
+            clientInfo: { name: "c", version: "0.0.0" },
+          },
+        }),
+      });
+      expect(init.status).toBe(200);
+      const sid = init.headers.get("mcp-session-id");
+      expect(sid).toBeTruthy();
+      await init.body?.cancel();
+
+      const ping = JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" });
+
+      // Non-initialize request without a session id -> 400 (-32000).
+      const noSid = await fetch(`${app.url}${MCP_PATH}`, {
+        method: "POST",
+        headers,
+        body: ping,
+      });
+      expect(noSid.status).toBe(400);
+      expect(JSON.parse(await noSid.text()).error.code).toBe(-32000);
+
+      // Unknown session id -> 404 (-32001).
+      const unknown = await fetch(`${app.url}${MCP_PATH}`, {
+        method: "POST",
+        headers: { ...headers, "mcp-session-id": "not-a-session" },
+        body: ping,
+      });
+      expect(unknown.status).toBe(404);
+      expect(JSON.parse(await unknown.text()).error.code).toBe(-32001);
+
+      // Valid session id -> 200.
+      const ok = await fetch(`${app.url}${MCP_PATH}`, {
+        method: "POST",
+        headers: { ...headers, "mcp-session-id": sid! },
+        body: ping,
+      });
+      expect(ok.status).toBe(200);
+      await ok.body?.cancel();
+
+      // DELETE terminates the session; later use -> 404.
+      const del = await fetch(`${app.url}${MCP_PATH}`, {
+        method: "DELETE",
+        headers: { ...headers, "mcp-session-id": sid! },
+      });
+      expect(del.status).toBe(200);
+      await del.body?.cancel();
+      const after = await fetch(`${app.url}${MCP_PATH}`, {
+        method: "POST",
+        headers: { ...headers, "mcp-session-id": sid! },
+        body: ping,
+      });
+      expect(after.status).toBe(404);
+      await after.body?.cancel();
+    } finally {
+      await app.close();
+    }
+  });
 });

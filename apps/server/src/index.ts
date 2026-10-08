@@ -42,7 +42,9 @@ function main(): void {
     const { resolveDatabasePath, getSchemaVersion, closeDatabase } =
       await import("./db.js");
     const dbPath = resolveDatabasePath();
-    const { server, db } = await createPolymerServer({ databasePath: dbPath });
+    const { server, db, closeSessions } = await createPolymerServer({
+      databasePath: dbPath,
+    });
     server.listen(port, host, () => {
       console.log(`polymer server ready on ${host}:${port}`);
       if (db) {
@@ -54,13 +56,19 @@ function main(): void {
 
     const shutdown = (signal: string) => {
       console.log(`polymer server received ${signal}, shutting down cleanly`);
-      server.close(() => {
-        try {
-          if (db) closeDatabase(db);
-        } finally {
-          process.exit(0);
-        }
-      });
+      void closeSessions()
+        .catch(() => {
+          // Sessions already closed; still shut the server down.
+        })
+        .finally(() => {
+          server.close(() => {
+            try {
+              if (db) closeDatabase(db);
+            } finally {
+              process.exit(0);
+            }
+          });
+        });
       setTimeout(() => process.exit(0), 1000).unref();
     };
 

@@ -18,8 +18,9 @@ interface AgentSession {
   token: string;
 }
 
-// One MCP server accepts one transport session: every client gets its
-// own server, all sharing one SQLite file (the fleet view).
+// Each client gets its own server, all sharing one SQLite file (the
+// fleet view). Servers accept many sessions now (mcp.test.ts); this
+// isolation is a fixture choice, not a transport limit.
 async function withClient<T>(
   dbPath: string,
   token: string | undefined,

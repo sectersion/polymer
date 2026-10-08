@@ -16,8 +16,8 @@ function tempDbPath(): string {
 type App = Awaited<ReturnType<typeof listen>>;
 type Db = NonNullable<App["db"]>;
 
-// One MCP server accepts one transport session: every client gets its own
-// server, all sharing one SQLite file (the fleet view).
+// Each client gets its own server, all sharing one SQLite file (the
+// fleet view); servers accept many sessions now (mcp.test.ts).
 async function withAnonClient<T>(
   dbPath: string,
   fn: (client: Client, db: Db) => Promise<T>,

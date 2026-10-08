@@ -5,7 +5,6 @@ import {
   type ServerResponse,
 } from "node:http";
 import { randomUUID } from "node:crypto";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { MCP_PATH, createMcpServer } from "./mcp.js";
 import { extractBearerToken } from "./auth.js";
@@ -21,8 +20,10 @@ export const HEALTH_PATH = "/health";
 
 export interface PolymerServer {
   server: Server;
-  mcpServer: McpServer;
   db: PolymerDatabase | null;
+  /** End all live MCP sessions (used on shutdown so open SSE streams
+   * do not hold `server.close()` open). */
+  closeSessions: () => Promise<void>;
 }
 
 export interface PolymerServerOptions {
@@ -35,6 +36,24 @@ function jsonResponse(
   body: unknown,
 ): void {
   const text = JSON.stringify(body);
+  res.writeHead(status, {
+    "content-type": "application/json",
+    "content-length": Buffer.byteLength(text),
+  });
+  res.end(text);
+}
+
+function jsonRpcErrorResponse(
+  res: ServerResponse,
+  status: number,
+  code: number,
+  message: string,
+): void {
+  const text = JSON.stringify({
+    jsonrpc: "2.0",
+    id: null,
+    error: { code, message },
+  });
   res.writeHead(status, {
     "content-type": "application/json",
     "content-length": Buffer.byteLength(text),
@@ -64,23 +83,47 @@ export async function createPolymerServer(
   options: PolymerServerOptions = {},
 ): Promise<PolymerServer> {
   const db = options.databasePath ? openDatabase(options.databasePath) : null;
-  const mcpServer = createMcpServer(db);
   // OTP verification budget: 10 req/min per IP + server-global 60/min,
   // consumed BEFORE any token lookup (component 7).
   const initVerifyLimiter = new InitVerifyLimiter();
   // Refresh budget: 5 req/min per credential plus a server-global
   // cap of 60/min (component 9).
   const refreshLimiter = new RefreshLimiter();
-  // Stateful transport: one instance manages MCP sessions (one session id
-  // per client) across requests on the shared port. Stateless mode forbids
-  // transport reuse, and a single McpServer accepts only one transport, so
-  // stateful is the smallest correct shape for a persistent ping tool.
-  const transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
-  });
-  // Connect before accepting requests; the transport then routes each
-  // request (by mcp-session-id) to this server.
-  await mcpServer.connect(transport);
+  // One transport + McpServer per MCP client session. The stateful
+  // transport accepts exactly one `initialize` for its lifetime, so a
+  // single shared instance would let the first client — even an
+  // unauthenticated one — consume the only session slot and wedge /mcp
+  // for every other agent until restart. Stateless mode is not an
+  // option: it forbids the session ids the agent-facing protocol needs.
+  // Sessions are keyed by the SDK-generated id and removed on session
+  // DELETE (`onsessionclosed`) or server shutdown.
+  const sessions = new Map<string, StreamableHTTPServerTransport>();
+
+  async function createSessionTransport(): Promise<StreamableHTTPServerTransport> {
+    const sessionServer = createMcpServer(db);
+    const sessionTransport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (sessionId) => {
+        sessions.set(sessionId, sessionTransport);
+      },
+      onsessionclosed: (sessionId) => {
+        sessions.delete(sessionId);
+      },
+    });
+    await sessionServer.connect(sessionTransport);
+    return sessionTransport;
+  }
+
+  const closeSessions = async (): Promise<void> => {
+    for (const sessionTransport of sessions.values()) {
+      try {
+        await sessionTransport.close();
+      } catch {
+        // Session already closed; keep shutting the rest down.
+      }
+    }
+    sessions.clear();
+  };
 
   const server = createServer(async (req, res) => {
     try {
@@ -197,14 +240,7 @@ export async function createPolymerServer(
             (typeof body !== "object" || body === null || Array.isArray(body)))
         ) {
           // Malformed MCP request: clean JSON-RPC error, no crash.
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(
-            JSON.stringify({
-              jsonrpc: "2.0",
-              id: null,
-              error: { code: -32700, message: "Parse error" },
-            }),
-          );
+          jsonRpcErrorResponse(res, 400, -32700, "Parse error");
           return;
         }
         if (agentId === undefined) {
@@ -226,7 +262,34 @@ export async function createPolymerServer(
             }
           }
         }
-        await transport.handleRequest(req, res, body);
+        // Route by session: existing sessions get their transport, a
+        // fresh `initialize` gets a new one, everything else mirrors
+        // the SDK's own session validation responses (404 unknown
+        // session, 400 missing session id).
+        const rawSessionId = req.headers["mcp-session-id"];
+        const sessionId = Array.isArray(rawSessionId)
+          ? rawSessionId[0]
+          : rawSessionId;
+        if (sessionId !== undefined && sessionId !== "") {
+          const existing = sessions.get(sessionId);
+          if (existing === undefined) {
+            jsonRpcErrorResponse(res, 404, -32001, "Session not found");
+            return;
+          }
+          await existing.handleRequest(req, res, body);
+          return;
+        }
+        if (isInitializeCall(body)) {
+          const sessionTransport = await createSessionTransport();
+          await sessionTransport.handleRequest(req, res, body);
+          return;
+        }
+        jsonRpcErrorResponse(
+          res,
+          400,
+          -32000,
+          "Bad Request: Mcp-Session-Id header is required",
+        );
         return;
       }
 
@@ -240,7 +303,14 @@ export async function createPolymerServer(
     }
   });
 
-  return { server, mcpServer, db };
+  return { server, db, closeSessions };
+}
+
+function isInitializeCall(body: unknown): boolean {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return false;
+  }
+  return (body as { method?: unknown }).method === "initialize";
 }
 
 function isRegisterAgentCall(body: unknown): boolean {
@@ -275,18 +345,19 @@ export async function listen(
   port = 0,
   options: PolymerServerOptions = {},
 ): Promise<ListeningServer> {
-  const { server, mcpServer, db } = await createPolymerServer(options);
+  const { server, db, closeSessions } = await createPolymerServer(options);
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
   const address = server.address();
   const actualPort =
     typeof address === "object" && address !== null ? address.port : port;
   return {
     server,
-    mcpServer,
     db: db as ListeningServer["db"],
+    closeSessions,
     url: `http://${host}:${actualPort}`,
-    close: () =>
-      new Promise<void>((resolve, reject) =>
+    close: async () => {
+      await closeSessions();
+      await new Promise<void>((resolve, reject) =>
         server.close((err) => {
           if (db) {
             try {
@@ -298,6 +369,7 @@ export async function listen(
           if (err) reject(err);
           else resolve();
         }),
-      ),
+      );
+    },
   };
 }

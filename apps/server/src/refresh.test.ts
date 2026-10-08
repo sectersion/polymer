@@ -23,8 +23,8 @@ interface Registered {
   reconnectSecret: string;
 }
 
-// One MCP server accepts one transport session: registration gets its
-// own server on the shared SQLite file.
+// Registration gets its own server on the shared SQLite file; servers
+// accept many sessions now (mcp.test.ts).
 async function registerAgent(
   dbPath: string,
   name: string,
