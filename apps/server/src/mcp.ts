@@ -239,18 +239,27 @@ export function createMcpServer(db: PolymerDatabase | null = null): McpServer {
         throw new McpError(ErrorCode.InvalidRequest, "unauthorized");
       }
       try {
-        const tasks = listTasks(db, {
-          status: args.status,
-          createdBy: args.created_by,
-          assignedTo: args.assigned_to,
-          limit: args.limit,
-        });
-        return toolResult({
-          tasks: tasks.map((task) =>
-            taskListItem(
-              task,
-              listTaskAssignees(db, task.task_id).map((a) => a.agent_id),
+        // One read transaction: task rows and their assignee rows come
+        // from a single SQLite snapshot, so a concurrent writer between
+        // the statements cannot produce a torn composite (e.g. a fresh
+        // version paired with stale assigned_to).
+        const tasks = db.transaction(() => {
+          const rows = listTasks(db, {
+            status: args.status,
+            createdBy: args.created_by,
+            assignedTo: args.assigned_to,
+            limit: args.limit,
+          });
+          return rows.map((task) => ({
+            task,
+            assigneeIds: listTaskAssignees(db, task.task_id).map(
+              (a) => a.agent_id,
             ),
+          }));
+        })();
+        return toolResult({
+          tasks: tasks.map(({ task, assigneeIds }) =>
+            taskListItem(task, assigneeIds),
           ),
         });
       } catch (err) {
@@ -273,10 +282,22 @@ export function createMcpServer(db: PolymerDatabase | null = null): McpServer {
         throw new McpError(ErrorCode.InvalidRequest, "unauthorized");
       }
       try {
-        const task = getTask(db, args.task_id);
-        if (task === undefined) {
+        // One read transaction: task + assignees from a single
+        // snapshot (see get_tasks).
+        const detail = db.transaction(() => {
+          const task = getTask(db, args.task_id);
+          if (task === undefined) return undefined;
+          return {
+            task,
+            assigneeIds: listTaskAssignees(db, task.task_id).map(
+              (a) => a.agent_id,
+            ),
+          };
+        })();
+        if (detail === undefined) {
           throw new McpError(ErrorCode.InvalidRequest, "task_not_found");
         }
+        const { task, assigneeIds } = detail;
         return toolResult({
           task_id: task.task_id,
           title: task.title,
@@ -288,9 +309,7 @@ export function createMcpServer(db: PolymerDatabase | null = null): McpServer {
           lease_generation: task.lease_generation,
           lease_expires_at: task.lease_expires_at,
           trace_parent: task.trace_parent,
-          assigned_to: listTaskAssignees(db, task.task_id).map(
-            (a) => a.agent_id,
-          ),
+          assigned_to: assigneeIds,
           // Comments arrive with component 17; shape is spec-stable now.
           comments: [],
           has_more: false,
