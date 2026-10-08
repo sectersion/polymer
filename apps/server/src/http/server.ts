@@ -350,8 +350,11 @@ export async function createPolymerServer(
             return;
           }
           agentId = session.principal.agentId;
+          // Deliberately informational only: token, clientId, extra.
+          // The raw Bearer secret is NOT carried on the request
+          // context (nothing downstream needs it; carrying it put a
+          // credential one logging bug away from every tool).
           (req as IncomingMessage & { auth?: unknown }).auth = {
-            token,
             clientId: agentId,
             extra: { agentId },
           };
