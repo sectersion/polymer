@@ -401,19 +401,17 @@ export async function createPolymerServer(
           }
         }
         // MCP budget: consumed before any session work. Authenticated
-        // requests key on the validated agent id; the unauthenticated
-        // `initialize` handshake keys on the socket address so session
-        // creation cannot be spammed. Session-bound notifications from
-        // unauthenticated bootstrap clients ride an existing session
-        // and create nothing, so they are not keyed here.
+        // requests key on the validated agent id; EVERYTHING
+        // unauthenticated — the initialize handshake, bootstrap
+        // notifications, register_agent, invalid-bearer probes —
+        // consumes the source-IP budget, so probing credentials or
+        // spamming keep-alives is rate-limited, never free. Session-
+        // bound notifications from unauthenticated bootstrap clients
+        // therefore no longer count as "free" traffic.
         const clientIp = req.socket.remoteAddress ?? "unknown";
         const limitKey =
-          agentId !== undefined
-            ? `agent:${agentId}`
-            : isInitializeCall(message)
-              ? `ip:${clientIp}`
-              : undefined;
-        if (limitKey !== undefined && !mcpLimiter.consume(limitKey)) {
+          agentId !== undefined ? `agent:${agentId}` : `ip:${clientIp}`;
+        if (!mcpLimiter.consume(limitKey)) {
           jsonResponse(res, 429, {
             error: "rate_limit_exceeded",
             retry_after: 60,
@@ -434,7 +432,13 @@ export async function createPolymerServer(
             jsonRpcErrorResponse(res, 404, -32001, "Session not found");
             return;
           }
-          existing.lastUsedAt = Date.now();
+          // Only authenticated traffic extends session life: a
+          // legitimate agent is back within the idle TTL the moment
+          // it calls a tool, while keep-alive-spamming bootstrap
+          // notifications cannot pin sessions into the cap forever.
+          if (agentId !== undefined) {
+            existing.lastUsedAt = Date.now();
+          }
           await existing.transport.handleRequest(req, res, message);
           return;
         }

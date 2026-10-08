@@ -452,6 +452,43 @@ describe("MCP transport (component 2, real session auth)", () => {
     }
   });
 
+  it("bootstrap keep-alive traffic cannot pin sessions into the cap", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath(),
+      mcpMaxSessions: 1,
+      mcpSessionIdleMs: 25,
+    });
+    try {
+      const first = await rawInitialize(app.url);
+      expect(first.status).toBe(200);
+      const sid = first.headers.get("mcp-session-id")!;
+      await first.body?.cancel();
+      // Unauthenticated notifications/initialized are session-bound
+      // but must NOT refresh liveness: keep-alive spam cannot buy a
+      // permanent slot.
+      for (let i = 0; i < 5; i += 1) {
+        const keep = await fetch(`${app.url}${MCP_PATH}`, {
+          method: "POST",
+          headers: { ...mcpHeaders(), "mcp-session-id": sid },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            method: "notifications/initialized",
+            params: {},
+          }),
+        });
+        expect(keep.status).not.toBe(404);
+        await keep.body?.cancel();
+      }
+      // The slot expires on schedule despite the spam above.
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      const second = await rawInitialize(app.url);
+      expect(second.status).toBe(200);
+      await second.body?.cancel();
+    } finally {
+      await app.close();
+    }
+  });
+
   it("stale sessions are swept at the cap instead of wedging it", async () => {
     const app = await listen("127.0.0.1", 0, {
       databasePath: tempDbPath(),
@@ -478,8 +515,12 @@ describe("MCP transport (component 2, real session auth)", () => {
   });
 
   it("the sweep frees expired sessions and keeps recently used ones", async () => {
+    const dbPath = tempDbPath();
+    // Only authenticated traffic refreshes session life now — the
+    // touch below is an authenticated ping.
+    const { sessionToken } = await registerSessionToken(dbPath, "agent-a");
     const app = await listen("127.0.0.1", 0, {
-      databasePath: tempDbPath(),
+      databasePath: dbPath,
       mcpMaxSessions: 2,
       mcpSessionIdleMs: 1200,
     });
@@ -491,17 +532,12 @@ describe("MCP transport (component 2, real session auth)", () => {
       const sid2 = second.headers.get("mcp-session-id")!;
       await second.body?.cancel();
 
-      // Age both sessions, then keep sid1 alive with a routed
-      // (bootstrap-permitted) notification.
+      // Age both sessions, then keep sid1 alive with an authenticated
+      // request (the only thing that refreshes liveness now).
       await new Promise((resolve) => setTimeout(resolve, 600));
-      const touch = await fetch(`${app.url}${MCP_PATH}`, {
-        method: "POST",
-        headers: { ...mcpHeaders(), "mcp-session-id": sid1 },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          method: "notifications/initialized",
-          params: {},
-        }),
+      const touch = await rawPing(app.url, {
+        ...mcpHeaders(sessionToken),
+        "mcp-session-id": sid1,
       });
       expect(touch.status).not.toBe(404);
       await touch.body?.cancel();
