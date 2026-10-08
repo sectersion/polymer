@@ -3,6 +3,7 @@ dist
 coverage
 .turbo
 *.tsbuildinfo
+*.db
 apps/web/.next
 apps/web/out
 pnpm-debug.log*
