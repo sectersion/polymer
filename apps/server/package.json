@@ -12,9 +12,9 @@
     "dev": "tsx src/index.ts",
     "lint": "eslint src",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "migrate:up": "tsx src/migrate.ts up",
-    "migrate:down": "tsx src/migrate.ts down",
-    "migrate:reset": "tsx src/migrate.ts reset"
+    "migrate:up": "tsx src/database/migrate.ts up",
+    "migrate:down": "tsx src/database/migrate.ts down",
+    "migrate:reset": "tsx src/database/migrate.ts reset"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
