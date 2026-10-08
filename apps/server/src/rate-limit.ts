@@ -1,12 +1,10 @@
 /**
- * Component 7: fixed-window rate limiter for init-token verification.
- *
- * OTP verify budget: 10 req/min per IP plus a server-global cap of
- * 60/min. The bucket is consumed BEFORE any token lookup or compare.
- * One instance lives per server (the "global" cap is per server
- * process); tests construct their own instances.
+ * Fixed-window rate limiter: a per-key bucket plus an optional
+ * server-global bucket. The bucket is consumed BEFORE any lookup or
+ * comparison. One instance lives per server process; tests construct
+ * their own instances.
  */
-export class InitVerifyLimiter {
+export class FixedWindowLimiter {
   private readonly perKey = new Map<
     string,
     { windowStart: number; count: number }
@@ -15,8 +13,8 @@ export class InitVerifyLimiter {
   private globalCount = 0;
 
   constructor(
-    private readonly perKeyLimit: number = 10,
-    private readonly globalLimit: number = 60,
+    private readonly perKeyLimit: number,
+    private readonly globalLimit: number,
     private readonly windowMs: number = 60_000,
     private readonly now: () => number = Date.now,
   ) {}
@@ -42,15 +40,45 @@ export class InitVerifyLimiter {
 }
 
 /**
- * Component 9: fixed-window rate limiter for reconnect refresh.
- *
- * Refresh budget: 5 req/min per credential plus a server-global cap of
- * 60/min. The bucket is consumed BEFORE any credential lookup or
- * compare. The per-key slot is keyed by the credential's public-id
- * prefix (not by IP).
+ * Component 7: init-token verification budget — 10 req/min per IP
+ * plus a server-global cap of 60/min. Consumed BEFORE any token
+ * lookup or compare.
+ */
+export class InitVerifyLimiter extends FixedWindowLimiter {
+  constructor(
+    perKeyLimit: number = 10,
+    globalLimit: number = 60,
+    windowMs: number = 60_000,
+    now: () => number = Date.now,
+  ) {
+    super(perKeyLimit, globalLimit, windowMs, now);
+  }
+}
+
+/**
+ * Component 9: reconnect refresh budget — 5 req/min per credential
+ * plus a server-global cap of 60/min. The per-key slot is keyed by the
+ * credential's public-id prefix (not by IP).
  */
 export class RefreshLimiter extends InitVerifyLimiter {
   constructor(windowMs = 60_000, now: () => number = Date.now) {
     super(5, 60, windowMs, now);
+  }
+}
+
+/**
+ * MCP request budget — 100 req/min per key (design default). The same
+ * limiter keys authenticated requests by agent id and the
+ * unauthenticated `initialize` handshake by source IP, so session
+ * creation cannot be spammed. No server-global bucket: total session
+ * growth is bounded by the server's session cap instead.
+ */
+export class McpLimiter extends FixedWindowLimiter {
+  constructor(
+    perKeyLimit: number = 100,
+    windowMs = 60_000,
+    now: () => number = Date.now,
+  ) {
+    super(perKeyLimit, Number.POSITIVE_INFINITY, windowMs, now);
   }
 }

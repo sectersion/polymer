@@ -13,7 +13,7 @@ import {
   refreshReconnect,
   verifySessionToken,
 } from "./credentials.js";
-import { InitVerifyLimiter, RefreshLimiter } from "./rate-limit.js";
+import { InitVerifyLimiter, McpLimiter, RefreshLimiter } from "./rate-limit.js";
 import { closeDatabase, openDatabase, type PolymerDatabase } from "./db.js";
 
 export const HEALTH_PATH = "/health";
@@ -28,6 +28,12 @@ export interface PolymerServer {
 
 export interface PolymerServerOptions {
   databasePath?: string;
+  /** MCP requests/min per agent and per source IP for anonymous
+   * `initialize` handshakes. Design default 100 (tune with usage). */
+  mcpRateLimitPerMin?: number;
+  /** Hard cap on concurrent MCP sessions — a backstop behind the
+   * per-IP handshake budget. Beyond it, `initialize` gets 429. */
+  mcpMaxSessions?: number;
 }
 
 function jsonResponse(
@@ -131,6 +137,10 @@ export async function createPolymerServer(
   // Refresh budget: 5 req/min per credential plus a server-global
   // cap of 60/min (component 9).
   const refreshLimiter = new RefreshLimiter();
+  // MCP budget: 100 req/min per agent; the anonymous `initialize`
+  // handshake is keyed by source IP. Session cap bounds total growth.
+  const mcpLimiter = new McpLimiter(options.mcpRateLimitPerMin ?? 100);
+  const maxSessions = options.mcpMaxSessions ?? 1000;
   // One transport + McpServer per MCP client session. The stateful
   // transport accepts exactly one `initialize` for its lifetime, so a
   // single shared instance would let the first client — even an
@@ -325,6 +335,26 @@ export async function createPolymerServer(
             }
           }
         }
+        // MCP budget: consumed before any session work. Authenticated
+        // requests key on the validated agent id; the unauthenticated
+        // `initialize` handshake keys on the socket address so session
+        // creation cannot be spammed. Session-bound notifications from
+        // unauthenticated bootstrap clients ride an existing session
+        // and create nothing, so they are not keyed here.
+        const clientIp = req.socket.remoteAddress ?? "unknown";
+        const limitKey =
+          agentId !== undefined
+            ? `agent:${agentId}`
+            : isInitializeCall(message)
+              ? `ip:${clientIp}`
+              : undefined;
+        if (limitKey !== undefined && !mcpLimiter.consume(limitKey)) {
+          jsonResponse(res, 429, {
+            error: "rate_limit_exceeded",
+            retry_after: 60,
+          });
+          return;
+        }
         // Route by session: existing sessions get their transport, a
         // fresh `initialize` gets a new one, everything else mirrors
         // the SDK's own session validation responses (404 unknown
@@ -343,6 +373,13 @@ export async function createPolymerServer(
           return;
         }
         if (isInitializeCall(message)) {
+          if (sessions.size >= maxSessions) {
+            jsonResponse(res, 429, {
+              error: "rate_limit_exceeded",
+              retry_after: 60,
+            });
+            return;
+          }
           const sessionTransport = await createSessionTransport();
           await sessionTransport.handleRequest(req, res, message);
           return;

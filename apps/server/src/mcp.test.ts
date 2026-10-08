@@ -7,6 +7,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { MCP_PATH } from "./mcp.js";
 import { listen } from "./server.js";
 import { mintCredential } from "./credentials.js";
+import { McpLimiter } from "./rate-limit.js";
 
 function tempDbPath(): string {
   return join(mkdtempSync(join(tmpdir(), "polymer-mcp-")), "test.db");
@@ -50,6 +51,45 @@ async function connect(url: string, token: string): Promise<Client> {
   );
   await client.connect(transport);
   return client;
+}
+
+function mcpHeaders(token?: string): Record<string, string> {
+  return {
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+async function rawInitialize(
+  url: string,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return fetch(`${url}${MCP_PATH}`, {
+    method: "POST",
+    headers: { ...mcpHeaders(), ...headers },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: { name: "raw", version: "0.0.0" },
+      },
+    }),
+  });
+}
+
+async function rawPing(
+  url: string,
+  headers: Record<string, string>,
+): Promise<Response> {
+  return fetch(`${url}${MCP_PATH}`, {
+    method: "POST",
+    headers: { ...mcpHeaders(), ...headers },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }),
+  });
 }
 
 describe("MCP transport (component 2, real session auth)", () => {
@@ -288,6 +328,105 @@ describe("MCP transport (component 2, real session auth)", () => {
       });
       expect(after.status).toBe(404);
       await after.body?.cancel();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("unit: MCP limiter default budget is 100 req/min per key", () => {
+    const limiter = new McpLimiter();
+    for (let i = 0; i < 100; i++) expect(limiter.consume("agent-a")).toBe(true);
+    expect(limiter.consume("agent-a")).toBe(false);
+    expect(limiter.consume("agent-b")).toBe(true);
+  });
+
+  it("authenticated MCP requests are limited per agent with retry_after", async () => {
+    const dbPath = tempDbPath();
+    const { sessionToken } = await registerSessionToken(dbPath, "agent-a");
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: dbPath,
+      mcpRateLimitPerMin: 3,
+    });
+    try {
+      const auth = mcpHeaders(sessionToken);
+      const init = await rawInitialize(app.url, auth);
+      expect(init.status).toBe(200);
+      const sid = init.headers.get("mcp-session-id")!;
+      await init.body?.cancel();
+
+      // initialize consumed 1 of 3; two more pings fit, the 4th does not.
+      for (let i = 0; i < 2; i++) {
+        const ok = await rawPing(app.url, {
+          ...auth,
+          "mcp-session-id": sid,
+        });
+        expect(ok.status).toBe(200);
+        await ok.body?.cancel();
+      }
+      const limited = await rawPing(app.url, {
+        ...auth,
+        "mcp-session-id": sid,
+      });
+      expect(limited.status).toBe(429);
+      expect(await limited.json()).toEqual({
+        error: "rate_limit_exceeded",
+        retry_after: 60,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("anonymous initialize handshakes are limited per source IP", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath(),
+      mcpRateLimitPerMin: 2,
+    });
+    try {
+      for (let i = 0; i < 2; i++) {
+        const res = await rawInitialize(app.url);
+        expect(res.status).toBe(200);
+        await res.body?.cancel();
+      }
+      const limited = await rawInitialize(app.url);
+      expect(limited.status).toBe(429);
+      expect(await limited.json()).toEqual({
+        error: "rate_limit_exceeded",
+        retry_after: 60,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("session cap rejects new handshakes but keeps existing sessions usable", async () => {
+    const dbPath = tempDbPath();
+    const { sessionToken } = await registerSessionToken(dbPath, "agent-a");
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: dbPath,
+      mcpMaxSessions: 1,
+    });
+    try {
+      const auth = mcpHeaders(sessionToken);
+      const init = await rawInitialize(app.url, auth);
+      expect(init.status).toBe(200);
+      const sid = init.headers.get("mcp-session-id")!;
+      await init.body?.cancel();
+
+      const rejected = await rawInitialize(app.url, auth);
+      expect(rejected.status).toBe(429);
+      expect(await rejected.json()).toEqual({
+        error: "rate_limit_exceeded",
+        retry_after: 60,
+      });
+
+      // The live session is unaffected by the cap.
+      const ok = await rawPing(app.url, {
+        ...auth,
+        "mcp-session-id": sid,
+      });
+      expect(ok.status).toBe(200);
+      await ok.body?.cancel();
     } finally {
       await app.close();
     }
