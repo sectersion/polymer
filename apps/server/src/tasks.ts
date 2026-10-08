@@ -76,6 +76,14 @@ export class TaskVersionMismatchError extends Error {
   }
 }
 
+export class TaskUnauthorizedError extends Error {
+  readonly code = "unauthorized";
+  constructor(taskId: string) {
+    super(`not coordinator with a live lease: ${taskId}`);
+    this.name = "TaskUnauthorizedError";
+  }
+}
+
 function isTaskStatus(value: string): value is TaskStatus {
   return (TASK_STATUSES as readonly string[]).includes(value);
 }
@@ -324,4 +332,92 @@ export function claimTask(
     };
   });
   return claim.immediate();
+}
+
+/**
+ * Component 14: the shared fencing guard all coordinator mutations
+ * (components 15-16, admin paths) call INSIDE their transaction.
+ * Re-reads the task and validates, together in that one transaction:
+ * caller == coordinator, live lease (`lease_expires_at > now`, NULL is
+ * expired), current lease_generation, expected_version.
+ *
+ * Returns the verified row so the mutation writes against a version
+ * it just validated. Errors: `task_not_found`; `unauthorized` when the
+ * caller is not the coordinator or their lease is expired (former
+ * coordinators are read-only); `version_mismatch` for a stale
+ * lease_generation or expected_version (catalog: both are 409 the
+ * optimistic-lock conflict).
+ */
+export function assertCoordinatorLease(
+  db: PolymerDatabase,
+  taskId: string,
+  caller: string,
+  leaseGeneration: number,
+  expectedVersion: number,
+): Task {
+  const task = getTask(db, taskId);
+  if (task === undefined) {
+    throw new TaskNotFoundError(taskId);
+  }
+  if (task.coordinator !== caller) {
+    throw new TaskUnauthorizedError(task.task_id);
+  }
+  const now = new Date().toISOString();
+  const live = task.lease_expires_at !== null && task.lease_expires_at > now;
+  if (!live) {
+    throw new TaskUnauthorizedError(task.task_id);
+  }
+  if (task.lease_generation !== leaseGeneration) {
+    throw new TaskVersionMismatchError(task.task_id);
+  }
+  if (task.version !== expectedVersion) {
+    throw new TaskVersionMismatchError(task.task_id);
+  }
+  return task;
+}
+
+/** Output of the component-14 probe write; the shape every coordinator
+ * mutation output starts from (`task_id`, `version`, `updated_at`). */
+export interface LeasedWriteResult {
+  task_id: string;
+  version: number;
+  updated_at: string;
+}
+
+/**
+ * Component 14 probe (testSeams builds only): runs a no-op write
+ * through the guard — version and updated_at only — in the exact
+ * transaction shape every coordinator mutation will use (guard +
+ * guarded write in one IMMEDIATE transaction). Never registered in
+ * production.
+ */
+export function testLeaseWrite(
+  db: PolymerDatabase,
+  taskId: string,
+  caller: string,
+  leaseGeneration: number,
+  expectedVersion: number,
+): LeasedWriteResult {
+  const write = db.transaction(() => {
+    const task = assertCoordinatorLease(
+      db,
+      taskId,
+      caller,
+      leaseGeneration,
+      expectedVersion,
+    );
+    const version = task.version + 1;
+    const updated_at = new Date().toISOString();
+    const updated = db
+      .prepare(
+        `UPDATE tasks SET version = ?, updated_at = ?
+          WHERE task_id = ? AND version = ?`,
+      )
+      .run(version, updated_at, task.task_id, task.version);
+    if (updated.changes !== 1) {
+      throw new TaskVersionMismatchError(task.task_id);
+    }
+    return { task_id: task.task_id, version, updated_at };
+  });
+  return write.immediate();
 }

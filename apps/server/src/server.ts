@@ -38,6 +38,9 @@ export interface PolymerServerOptions {
    * Swept only under capacity pressure (at the cap), so below-cap
    * deployments never evict a connected-but-quiet client. */
   mcpSessionIdleMs?: number;
+  /** Component 14: register test-only MCP probe tools. Default false —
+   * probes never ship in production builds. */
+  testSeams?: boolean;
 }
 
 interface McpSession {
@@ -162,7 +165,9 @@ export async function createPolymerServer(
   const sessions = new Map<string, McpSession>();
 
   async function createSessionTransport(): Promise<StreamableHTTPServerTransport> {
-    const sessionServer = createMcpServer(db);
+    const sessionServer = createMcpServer(db, {
+      testSeams: options.testSeams ?? false,
+    });
     const sessionTransport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (sessionId) => {

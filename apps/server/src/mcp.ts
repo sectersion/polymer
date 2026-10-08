@@ -13,12 +13,14 @@ import {
   TaskAlreadyClaimedError,
   TaskInvalidStatusError,
   TaskNotFoundError,
+  TaskUnauthorizedError,
   TaskVersionMismatchError,
   claimTask,
   createTask,
   getTask,
   listTaskAssignees,
   listTasks,
+  testLeaseWrite,
   type Task,
 } from "./tasks.js";
 
@@ -58,6 +60,7 @@ function taskToolError(err: unknown): never {
     err instanceof TaskNotFoundError ||
     err instanceof TaskAlreadyClaimedError ||
     err instanceof TaskVersionMismatchError ||
+    err instanceof TaskUnauthorizedError ||
     err instanceof TaskAgentNotFoundError
   ) {
     throw new McpError(ErrorCode.InvalidRequest, err.code);
@@ -99,7 +102,22 @@ function toolResult(body: ToolBody): {
   };
 }
 
-export function createMcpServer(db: PolymerDatabase | null = null): McpServer {
+export interface McpServerOptions {
+  /**
+   * Component 14: register test-only probe tools (`__test_lease_write`)
+   * alongside the real surface. Default false — probes never ship in
+   * production builds; the full POLYMER.json config loader arrives with
+   * its component, this option is its gate seam until then.
+   */
+  testSeams: boolean;
+}
+
+const DEFAULT_MCP_SERVER_OPTIONS: McpServerOptions = { testSeams: false };
+
+export function createMcpServer(
+  db: PolymerDatabase | null = null,
+  options: McpServerOptions = DEFAULT_MCP_SERVER_OPTIONS,
+): McpServer {
   const server = new McpServer({ name: "polymer", version: VERSION });
   server.registerTool(
     "ping",
@@ -361,5 +379,43 @@ export function createMcpServer(db: PolymerDatabase | null = null): McpServer {
       }
     },
   );
+  if (options.testSeams) {
+    // Component 14 probe: exists only when testSeams is set in
+    // config; never present in production builds. Proves the shared
+    // fencing guard in isolation via a no-op write.
+    server.registerTool(
+      "__test_lease_write",
+      {
+        description:
+          "Test-only: run a no-op write through the coordinator lease guard (testSeams builds only)",
+        inputSchema: {
+          task_id: z.string().min(1),
+          lease_generation: z.number().int(),
+          expected_version: z.number().int(),
+        },
+      },
+      async (args, extra) => {
+        if (db === null) {
+          throw new McpError(ErrorCode.InternalError, "database_error");
+        }
+        const caller = callerAgentId(extra);
+        if (caller === undefined) {
+          throw new McpError(ErrorCode.InvalidRequest, "unauthorized");
+        }
+        try {
+          const out = testLeaseWrite(
+            db,
+            args.task_id,
+            caller,
+            args.lease_generation,
+            args.expected_version,
+          );
+          return toolResult({ ...out });
+        } catch (err) {
+          taskToolError(err);
+        }
+      },
+    );
+  }
   return server;
 }
