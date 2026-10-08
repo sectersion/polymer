@@ -1,4 +1,4 @@
-import { createAgent } from "./agents.js";
+import { createAgent, isUniqueViolation } from "./agents.js";
 import {
   RECONNECT_TTL_MS,
   SESSION_TTL_MS,
@@ -36,15 +36,6 @@ export class RegistrationError extends Error {
     super(code);
     this.name = "RegistrationError";
   }
-}
-
-function isUniqueViolation(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    "code" in err &&
-    (err as { code: unknown }).code === "SQLITE_CONSTRAINT_UNIQUE"
-  );
 }
 
 /**
