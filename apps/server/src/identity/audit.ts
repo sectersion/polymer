@@ -87,7 +87,7 @@ export function recordAudit(
 }
 
 export interface AuditPage {
-  audits: AuditLogRow[];
+  entries: AuditLogRow[];
   next_cursor: string | null;
 }
 
@@ -128,7 +128,7 @@ export function listAudit(
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
   return {
-    audits: page.map(toAuditRow),
+    entries: page.map(toAuditRow),
     next_cursor: hasMore ? encodeCursor(page[page.length - 1]._rowid) : null,
   };
 }

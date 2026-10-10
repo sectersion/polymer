@@ -290,11 +290,11 @@ describe("REST reads (component 18)", () => {
       expect(method.status).toBe(405);
       expect((await jsonBody(method))["error"]).toBe("method_not_allowed");
 
-      // GET /api/audit is a component-19 route (audits begin empty).
+      // GET /api/audit is a component-19 route (entries begin empty).
       const unknownApi = await restGet(app.url, "/api/audit", cookie);
       expect(unknownApi.status).toBe(200);
       expect(Object.keys(await jsonBody(unknownApi)).sort()).toEqual([
-        "audits",
+        "entries",
         "next_cursor",
       ]);
     } finally {

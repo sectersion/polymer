@@ -27,6 +27,7 @@ import {
   openDatabase,
   type PolymerDatabase,
 } from "../database/db.js";
+import { MAX_JSON_BODY_BYTES, MAX_REQUEST_BYTES, readBody } from "./common.js";
 
 export const HEALTH_PATH = "/health";
 
@@ -107,64 +108,6 @@ function jsonRpcErrorResponse(
     "content-length": Buffer.byteLength(text),
   });
   res.end(text);
-}
-
-/** General request body cap: `security.maxMessageSize` (design default 10 MiB). */
-const MAX_REQUEST_BYTES = 10 * 1024 * 1024;
-/**
- * MCP messages are small (tool args, JSON-RPC): cap them tighter than
- * the general limit so an unauthenticated stream cannot buffer
- * megabytes before auth (design parking lot: "MCP request body size
- * cap ... 1 MiB + 413").
- */
-const MAX_MCP_MESSAGE_BYTES = 1024 * 1024;
-
-type ReadBodyResult =
-  | { kind: "parsed"; value: unknown }
-  | { kind: "empty" }
-  | { kind: "invalid" }
-  | { kind: "too-large" };
-
-function readBody(
-  req: IncomingMessage,
-  maxBytes: number,
-): Promise<ReadBodyResult> {
-  return new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    let total = 0;
-    let settled = false;
-    const finish = (result: ReadBodyResult): void => {
-      if (settled) return;
-      settled = true;
-      resolve(result);
-    };
-    req.on("data", (c: Buffer) => {
-      total += c.length;
-      if (total > maxBytes) {
-        // Stop buffering immediately; the caller replies 413 and the
-        // connection is closed. Memory stays bounded regardless of how
-        // much the client keeps sending.
-        finish({ kind: "too-large" });
-        return;
-      }
-      chunks.push(c);
-    });
-    req.on("end", () => {
-      if (settled) return;
-      const raw = Buffer.concat(chunks).toString("utf8");
-      if (raw.trim() === "") {
-        finish({ kind: "empty" });
-        return;
-      }
-      try {
-        finish({ kind: "parsed", value: JSON.parse(raw) });
-      } catch {
-        finish({ kind: "invalid" });
-      }
-    });
-    // The connection died mid-body; no response can be delivered anyway.
-    req.on("error", () => finish({ kind: "invalid" }));
-  });
 }
 
 export async function createPolymerServer(
@@ -425,7 +368,7 @@ export async function createPolymerServer(
             extra: { agentId },
           };
         }
-        const body = await readBody(req, MAX_MCP_MESSAGE_BYTES);
+        const body = await readBody(req, MAX_JSON_BODY_BYTES);
         if (body.kind === "too-large") {
           jsonResponse(
             res,
@@ -568,7 +511,10 @@ export async function createPolymerServer(
 
   // Component 21: WebSocket upgrade routing. Only /api/events with a
   // database upgrades; everything else (and db-less servers) fails
-  // the upgrade closed like every other surface.
+  // the upgrade closed like every other surface. Handshakes consume
+  // the login budget per IP first: verification costs DB lookups +
+  // SHA-256, and unbounded upgrade spam would burn CPU with no
+  // bucket. Exhausted budgets fail closed (destroy, no upgrade).
   if (db !== null) {
     const upgradeDb: PolymerDatabase = db;
     const handleUpgrade = attachUpgrade(wss, events, upgradeDb);
@@ -581,6 +527,11 @@ export async function createPolymerServer(
         return;
       }
       if (pathname !== "/api/events") {
+        socket.destroy();
+        return;
+      }
+      const ip = req.socket.remoteAddress ?? "unknown";
+      if (!adminLimiters.login.consume(ip)) {
         socket.destroy();
         return;
       }

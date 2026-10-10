@@ -1,6 +1,13 @@
-import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { PolymerDatabase } from "../database/db.js";
+import {
+  MAX_JSON_BODY_BYTES,
+  constantTimeStringEqual,
+  mapServiceError,
+  readAdminCookie,
+  readBody,
+  sendJson,
+} from "./common.js";
 import {
   ADMIN_SESSION_EXPIRY_SECONDS,
   INIT_TOKEN_DEFAULT_TTL_SECONDS,
@@ -25,6 +32,8 @@ import {
   adminClaimTask,
   adminTransferCoordinator,
   adminUpdateTaskStatus,
+  decodeCursor,
+  encodeCursor,
   getTaskDetail,
   postComment,
   serializeTaskDetail,
@@ -46,94 +55,17 @@ import {
  * release, in identity/disable.ts) — nothing pretends to disable.
  */
 
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  const text = JSON.stringify(body);
-  res.writeHead(status, {
-    "content-type": "application/json",
-    "content-length": Buffer.byteLength(text),
-  });
-  res.end(text);
-}
-
-function readBody(
-  req: IncomingMessage,
-  maxBytes: number = 1024 * 1024,
-): Promise<unknown> {
-  return new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    let total = 0;
-    let settled = false;
-    const finish = (value: unknown): void => {
-      if (settled) return;
-      settled = true;
-      resolve(value);
-    };
-    req.on("data", (c: Buffer) => {
-      total += c.length;
-      if (total > maxBytes) {
-        finish(undefined);
-        return;
-      }
-      chunks.push(c);
-    });
-    req.on("end", () => {
-      if (settled) return;
-      const raw = Buffer.concat(chunks).toString("utf8");
-      if (raw.trim() === "") return finish(undefined);
-      try {
-        finish(JSON.parse(raw));
-      } catch {
-        finish(undefined);
-      }
-    });
-    req.on("error", () => finish(undefined));
-  });
-}
-
 function invalidRequest(res: ServerResponse): void {
   sendJson(res, 400, { error: "invalid_request" });
 }
 
-const CATALOG_STATUS: Record<string, number> = {
-  task_not_found: 404,
-  agent_not_found: 404,
-  not_found: 404,
-  invalid_status: 400,
-  invalid_cursor: 400,
-  invalid_request: 400,
-  already_assigned: 409,
-  not_assigned: 400,
-  task_already_claimed: 409,
-  version_mismatch: 409,
-  unauthorized: 403,
-  name_taken: 409,
-  invalid_role: 400,
-};
-
-function mapServiceError(res: ServerResponse, err: unknown): void {
-  if (err instanceof Error && err.name === "SqliteError") {
-    sendJson(res, 503, { error: "database_error" });
-    return;
-  }
-  const code = (err as { code?: string } | undefined)?.code;
-  if (typeof code === "string" && CATALOG_STATUS[code] !== undefined) {
-    sendJson(res, CATALOG_STATUS[code], { error: code });
-    return;
-  }
-  throw err;
-}
-
-function readAdminCookie(req: IncomingMessage): string | undefined {
-  const header = req.headers["cookie"];
-  if (typeof header !== "string") return undefined;
-  for (const pair of header.split(";")) {
-    const eq = pair.indexOf("=");
-    if (eq === -1) continue;
-    if (pair.slice(0, eq).trim() === "__Host-polymer_admin") {
-      return pair.slice(eq + 1).trim();
-    }
-  }
-  return undefined;
+/** Drop the internal rowid alias before serializing a page row. */
+function stripRowid(
+  row: Record<string, unknown> & { _rowid: number },
+): Record<string, unknown> {
+  const copy: Record<string, unknown> = { ...row };
+  delete copy._rowid;
+  return copy;
 }
 
 interface AdminAuth {
@@ -155,13 +87,6 @@ function requireAdminSession(
   }
   sendJson(res, 401, { error: "invalid_token" });
   return undefined;
-}
-
-function constantTimeStringEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a, "utf8");
-  const bb = Buffer.from(b, "utf8");
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
 }
 
 /** Read routes need the session; mutations need session + CSRF (403). */
@@ -267,8 +192,18 @@ export function handleAdminRequest(
         sendJson(res, 429, { error: "rate_limit_exceeded", retry_after: 60 });
         return true;
       }
-      void readBody(req)
-        .then((body) => {
+      void readBody(req, MAX_JSON_BODY_BYTES)
+        .then((result) => {
+          if (result.kind === "too-large") {
+            sendJson(
+              res,
+              413,
+              { error: "payload_too_large" },
+              { connection: "close" },
+            );
+            return;
+          }
+          const body = result.kind === "parsed" ? result.value : undefined;
           const master = (body as { master_credential?: unknown })
             ?.master_credential;
           if (typeof master !== "string" || master === "") {
@@ -318,6 +253,9 @@ export function handleAdminRequest(
     if (auth === undefined) return true;
 
     if (pathname === "/api/auth/logout" && req.method === "POST") {
+      // State-changing: requires CSRF like every other mutation (the
+      // console logout button proxies with a server-side token).
+      if (!requireCsrf(req, res, db, auth)) return true;
       // Delete the server-side session row; clear the cookie with
       // attributes identical to how it was set. Live sockets for this
       // session close in the same obligation (component 21).
@@ -349,8 +287,17 @@ export function handleAdminRequest(
         return true;
       }
       if (!requireCsrf(req, res, db, auth)) return true;
-      void readBody(req)
-        .then(() => {
+      void readBody(req, MAX_JSON_BODY_BYTES)
+        .then((result) => {
+          if (result.kind === "too-large") {
+            sendJson(
+              res,
+              413,
+              { error: "payload_too_large" },
+              { connection: "close" },
+            );
+            return;
+          }
           const out = rotateMaster(db, auth.credentialId);
           // Rotation revokes every live admin session: close every
           // live socket in the same obligation (component 21).
@@ -363,14 +310,44 @@ export function handleAdminRequest(
 
     // --- tokens ---
     if (pathname === "/api/tokens" && req.method === "GET") {
+      // Uniform list conventions: limit default 50, max 500, opaque
+      // cursor, terminal next_cursor null.
+      let limit = 50;
+      const rawLimit = url.searchParams.get("limit");
+      if (rawLimit !== null) {
+        const parsed = Number(rawLimit);
+        if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 500) {
+          const err = new Error("invalid_request") as Error & {
+            code: string;
+          };
+          err.code = "invalid_request";
+          throw err;
+        }
+        limit = parsed;
+      }
+      const rawCursor = url.searchParams.get("cursor");
+      let cursorRowid = 0;
+      if (rawCursor !== null) {
+        cursorRowid = decodeCursor(rawCursor);
+      }
       const rows = db
         .prepare(
-          `SELECT credential_id, public_id, type, status, agent_id,
-                  created_at, expires_at, last_used_at
-             FROM credentials ORDER BY created_at ASC, rowid ASC`,
+          `SELECT rowid AS _rowid, credential_id, public_id, type, status,
+                  agent_id, created_at, expires_at, last_used_at
+             FROM credentials WHERE rowid > ?
+             ORDER BY created_at ASC, rowid ASC LIMIT ?`,
         )
-        .all() as Record<string, unknown>[];
-      sendJson(res, 200, { tokens: rows });
+        .all(cursorRowid, limit + 1) as Array<
+        Record<string, unknown> & { _rowid: number }
+      >;
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+      sendJson(res, 200, {
+        tokens: page.map(stripRowid),
+        next_cursor: hasMore
+          ? encodeCursor(page[page.length - 1]._rowid)
+          : null,
+      });
       return true;
     }
 
@@ -380,6 +357,10 @@ export function handleAdminRequest(
       req.method === "DELETE"
     ) {
       if (!requireCsrf(req, res, db, auth)) return true;
+      if (!ops.consume(auth.credentialId)) {
+        sendJson(res, 429, { error: "rate_limit_exceeded", retry_after: 60 });
+        return true;
+      }
       const credentialId = pathname.slice("/api/tokens/".length);
       // Revocation is idempotent on existing rows (a used OTP is
       // already dead; revoking it changes nothing observable).
@@ -405,8 +386,17 @@ export function handleAdminRequest(
         return true;
       }
       if (!requireCsrf(req, res, db, auth)) return true;
-      void readBody(req)
-        .then(() => {
+      void readBody(req, MAX_JSON_BODY_BYTES)
+        .then((result) => {
+          if (result.kind === "too-large") {
+            sendJson(
+              res,
+              413,
+              { error: "payload_too_large" },
+              { connection: "close" },
+            );
+            return;
+          }
           // The master credential is accepted ONLY at /api/auth/login:
           // the body is ignored; an administrator session is the only
           // authority here. The plaintext OTP is returned once and
@@ -450,7 +440,7 @@ export function handleAdminRequest(
         cursor: url.searchParams.get("cursor") ?? undefined,
       });
       sendJson(res, 200, {
-        audits: page.audits,
+        entries: page.entries,
         next_cursor: page.next_cursor,
       });
       return true;
@@ -505,9 +495,20 @@ export function handleAdminRequest(
           sendJson(res, 429, { error: "rate_limit_exceeded", retry_after: 60 });
           return true;
         }
-        void readBody(req)
-          .then((body) => {
-            const patch = (body ?? {}) as Record<string, unknown>;
+        void readBody(req, MAX_JSON_BODY_BYTES)
+          .then((result) => {
+            if (result.kind === "too-large") {
+              sendJson(
+                res,
+                413,
+                { error: "payload_too_large" },
+                { connection: "close" },
+              );
+              return;
+            }
+            const patch = (
+              result.kind === "parsed" ? result.value : {}
+            ) as Record<string, unknown>;
             const status = patch["status"];
             const expectedVersion = patch["expected_version"];
             const leaseGeneration = patch["lease_generation"];
@@ -557,9 +558,20 @@ export function handleAdminRequest(
           sendJson(res, 429, { error: "rate_limit_exceeded", retry_after: 60 });
           return true;
         }
-        void readBody(req)
-          .then((raw) => {
-            const body = (raw ?? {}) as Record<string, unknown>;
+        void readBody(req, MAX_JSON_BODY_BYTES)
+          .then((result) => {
+            if (result.kind === "too-large") {
+              sendJson(
+                res,
+                413,
+                { error: "payload_too_large" },
+                { connection: "close" },
+              );
+              return;
+            }
+            const body = (
+              result.kind === "parsed" ? result.value : {}
+            ) as Record<string, unknown>;
             const force = body["force"] === true;
             const expected = body["expected_version"];
             const generation = body["lease_generation"];

@@ -14,10 +14,16 @@ export interface DisableResult {
  * Component 19: idempotent disable over a frozen subtree. The
  * descendant set is snapshotted first (recursive CTE over
  * parent_agent_id), then walked in bounded batches of 500 agents per
- * transaction, each batch with one `agent.disable.batch` audit row
- * carrying the batch's disabled_agents. Completed batches are
+ * transaction, each non-empty batch with one `agent.disable.batch`
+ * audit row naming the flipped agents. Completed batches are
  * skipped (status check), so crash or 503 between batches is safe:
  * retry the same call until `complete: true`.
+ *
+ * `complete: true` means this snapshot drained, not that no
+ * disabled-subtree member can ever remain enabled: a spawn landing
+ * after the snapshot but before its parent's batch commits passes
+ * the freeze check and escapes this call (retry re-snapshots and
+ * catches it).
  *
  * Disabling releases task leases: every task the batch coordinates
  * keeps its coordinator (history) but gets `lease_expires_at: null`
@@ -79,16 +85,21 @@ export function disableAgentSubtree(
           WHERE coordinator IN (${placeholders})
             AND lease_expires_at IS NOT NULL`,
       ).run(new Date().toISOString(), ...batch);
-      recordAudit(db, {
-        actor_type: "admin_session",
-        actor_id: actorSessionId,
-        action: "agent.disable.batch",
-        before: null,
-        after: {
-          disabled_count: disabled.changes,
-          disabled_agents: batch,
-        },
-      });
+      // Only batches that flipped rows audit: an idempotent retry
+      // must not claim agents it did not disable. The row names the
+      // flipped agents, not the whole batch slice.
+      if (flipped.length > 0) {
+        recordAudit(db, {
+          actor_type: "admin_session",
+          actor_id: actorSessionId,
+          action: "agent.disable.batch",
+          before: null,
+          after: {
+            disabled_count: flipped.length,
+            disabled_agents: flipped.map((r) => r.agent_id),
+          },
+        });
+      }
       onBatch?.(flipped.map((r) => r.agent_id));
       return disabled.changes;
     });

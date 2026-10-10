@@ -634,7 +634,7 @@ The table (C = CSRF required):
       Auth: administrator session (+ CSRF)
       Enabled by `ui.adminClaimEnabled` (default true); when false the route returns 403.
       Body: { lease_duration_seconds? }
-      Response: { task_id, status, coordinator, version, lease_expires_at, lease_generation }
+      Response: { task_id, title, status, coordinator, version, lease_expires_at, lease_generation }
       Behavior: keeps `coordinator` unchanged (admin has no agent identity
         and coordinator is never caller-supplied); sets `lease_expires_at`
         to now + duration (or `tasks.lease_default_seconds`); increments
@@ -2360,7 +2360,10 @@ Endpoint: `GET /api/events` (upgrade). Browsers cannot set custom
 headers on a WebSocket upgrade, so the handshake is: session cookie
 (sent automatically) plus the CSRF token as a `?csrf=` query parameter,
 validated against the session like any state-changing request, plus a
-server `Origin` allowlist check. Failure closes with code 4401. Events
+server `Origin` allowlist check. Failure closes with code 4401. The
+`?csrf=` token travels in the URL by browser necessity: operators
+must scrub query strings from access logs and diagnostic bundles
+(the server itself never logs request URLs with queries). Events
 use the envelope `{ event_id, type, at, data }`; clients resume with
 `/api/events?cursor=<event_id>&csrf=<token>` and the server replays
 missed events from the (bounded) buffer, then streams live. The server

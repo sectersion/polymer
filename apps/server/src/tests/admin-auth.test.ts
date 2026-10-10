@@ -214,9 +214,10 @@ describe("administrator authentication (component 19)", () => {
     });
     try {
       const master = bootstrapMaster(app.db!)!;
-      const { cookie } = await loginSession(app, master);
+      const { cookie, csrf } = await loginSession(app, master);
       const out = await adminFetch(app, "/api/auth/logout", {
         cookie,
+        csrf,
         method: "POST",
       });
       expect(out.status).toBe(200);
@@ -269,6 +270,18 @@ describe("administrator authentication (component 19)", () => {
       });
       expect(wrongToken.status).toBe(403);
       expect((await jsonBody(wrongToken))["error"]).toBe("csrf_invalid");
+
+      // Logout is state-changing too: no CSRF, no logout (the
+      // session survives a missing token).
+      const logoutNoCsrf = await adminFetch(app, "/api/auth/logout", {
+        cookie,
+        method: "POST",
+      });
+      expect(logoutNoCsrf.status).toBe(403);
+      expect((await jsonBody(logoutNoCsrf))["error"]).toBe("csrf_invalid");
+      expect((await adminFetch(app, "/api/agents", { cookie })).status).toBe(
+        200,
+      );
 
       // Correct token proceeds.
       const ok = await adminFetch(app, "/api/tokens/init", {
@@ -328,7 +341,7 @@ describe("administrator authentication (component 19)", () => {
         cookie: fresh.cookie,
       });
       expect(audit.status).toBe(200);
-      const audits = (await jsonBody(audit))["audits"] as Array<
+      const audits = (await jsonBody(audit))["entries"] as Array<
         Record<string, unknown>
       >;
       const rotations = audits.filter((r) => r["action"] === "master.rotated");
@@ -411,7 +424,7 @@ describe("administrator authentication (component 19)", () => {
       const audit = await jsonBody(
         await adminFetch(app, `/api/audit?task_id=${taskId}`, { cookie }),
       );
-      const rows = audit["audits"] as Array<Record<string, unknown>>;
+      const rows = audit["entries"] as Array<Record<string, unknown>>;
       expect(rows).toHaveLength(1);
       expect(rows[0]["action"]).toBe("task.status.bypass");
       expect(rows[0]["actor_type"]).toBe("admin_session");
@@ -471,7 +484,7 @@ describe("administrator authentication (component 19)", () => {
       const audit = await jsonBody(
         await adminFetch(app, `/api/audit?task_id=${taskId}`, { cookie }),
       );
-      const rows = audit["audits"] as Array<Record<string, unknown>>;
+      const rows = audit["entries"] as Array<Record<string, unknown>>;
       expect(rows.map((r) => r["action"])).toContain("task.claim.bypass");
     } finally {
       await app.close();
@@ -556,7 +569,7 @@ describe("administrator authentication (component 19)", () => {
       const audit = await jsonBody(
         await adminFetch(app, `/api/audit?task_id=${taskId}`, { cookie }),
       );
-      const actions = (audit["audits"] as Array<Record<string, unknown>>).map(
+      const actions = (audit["entries"] as Array<Record<string, unknown>>).map(
         (r) => r["action"],
       );
       expect(actions).toContain("task.assign.bypass");
@@ -628,13 +641,38 @@ describe("administrator authentication (component 19)", () => {
 
       const listed = await adminFetch(app, "/api/tokens", { cookie });
       expect(listed.status).toBe(200);
-      const tokens = (await jsonBody(listed))["tokens"] as Array<
-        Record<string, unknown>
-      >;
+      const listedBody = await jsonBody(listed);
+      expect(Object.keys(listedBody).sort()).toEqual(["next_cursor", "tokens"]);
+      const tokens = listedBody["tokens"] as Array<Record<string, unknown>>;
       expect(tokens.length).toBeGreaterThan(0);
+      expect(listedBody["next_cursor"]).toBeNull();
       for (const row of tokens) {
         expect("token_hash" in row).toBe(false);
       }
+
+      // Uniform list conventions: limit + cursor page the rows.
+      const page1 = await jsonBody(
+        await adminFetch(app, "/api/tokens?limit=1", { cookie }),
+      );
+      expect((page1["tokens"] as unknown[]).length).toBe(1);
+      expect(page1["next_cursor"]).toBeTruthy();
+      const page2 = await jsonBody(
+        await adminFetch(
+          app,
+          `/api/tokens?limit=1&cursor=${page1["next_cursor"]}`,
+          { cookie },
+        ),
+      );
+      expect(
+        (page2["tokens"] as Array<Record<string, unknown>>)[0]["credential_id"],
+      ).not.toBe(
+        (page1["tokens"] as Array<Record<string, unknown>>)[0]["credential_id"],
+      );
+      const badCursor = await adminFetch(app, "/api/tokens?cursor=garbage", {
+        cookie,
+      });
+      expect(badCursor.status).toBe(400);
+      expect((await jsonBody(badCursor))["error"]).toBe("invalid_cursor");
 
       const minted = await adminFetch(app, "/api/tokens/init", {
         cookie,

@@ -3,6 +3,7 @@ import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
 import type { PolymerDatabase } from "../database/db.js";
 import { verifyAdminSession } from "../identity/credentials.js";
+import { constantTimeStringEqual, readAdminCookie } from "./common.js";
 
 export interface FleetEvent {
   event_id: number;
@@ -13,6 +14,12 @@ export interface FleetEvent {
 
 /** Bounded replay buffer: resume replays missed events, then live. */
 const BUFFER_SIZE = 1000;
+/**
+ * Per-socket pending cap: replay (≤1000) plus live burst must fit
+ * with headroom; beyond that the client is not keeping up, so fail
+ * the socket closed and let it resume with its cursor.
+ */
+const MAX_PENDING = 2000;
 /** Application close code for failed handshakes (spec: 4401). */
 export const HANDSHAKE_FAILED_CODE = 4401;
 /** Session revalidation tick: backstop only, never the primary path. */
@@ -86,6 +93,15 @@ export class EventBus {
       this.pending.set(socket, queue);
     }
     queue.push(event);
+    if (queue.length > MAX_PENDING) {
+      // Client not keeping up: fail closed; it resumes by cursor.
+      this.pending.delete(socket);
+      try {
+        socket.terminate();
+      } catch {
+        // Already gone.
+      }
+    }
   }
 
   /** Events after `cursor` (exclusive); unknown cursors replay the
@@ -202,28 +218,6 @@ export class EventBus {
       }
     }
   }
-}
-
-function readAdminCookie(req: IncomingMessage): string | undefined {
-  const header = req.headers["cookie"];
-  if (typeof header !== "string") return undefined;
-  for (const pair of header.split(";")) {
-    const eq = pair.indexOf("=");
-    if (eq === -1) continue;
-    if (pair.slice(0, eq).trim() === "__Host-polymer_admin") {
-      return pair.slice(eq + 1).trim();
-    }
-  }
-  return undefined;
-}
-
-function constantTimeStringEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
 }
 
 export interface HandshakeResult {

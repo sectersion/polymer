@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { mapServiceError, readAdminCookie, sendJson } from "./common.js";
 import type { PolymerDatabase } from "../database/db.js";
 import {
   getAgentById,
@@ -27,30 +28,6 @@ import {
  * set). Today the session row is service-seeded.
  */
 
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  const text = JSON.stringify(body);
-  res.writeHead(status, {
-    "content-type": "application/json",
-    "content-length": Buffer.byteLength(text),
-  });
-  res.end(text);
-}
-
-const ADMIN_COOKIE = "__Host-polymer_admin";
-
-function readAdminCookie(req: IncomingMessage): string | undefined {
-  const header = req.headers["cookie"];
-  if (typeof header !== "string") return undefined;
-  for (const pair of header.split(";")) {
-    const eq = pair.indexOf("=");
-    if (eq === -1) continue;
-    if (pair.slice(0, eq).trim() === ADMIN_COOKIE) {
-      return pair.slice(eq + 1).trim();
-    }
-  }
-  return undefined;
-}
-
 function requireAdminSession(
   req: IncomingMessage,
   res: ServerResponse,
@@ -63,43 +40,6 @@ function requireAdminSession(
   // Catalog: invalid_token is the 401 code for a missing/unknown credential.
   sendJson(res, 401, { error: "invalid_token" });
   return false;
-}
-
-/** MCP-catalog error → HTTP status (design lines ~590-611). */
-const CATALOG_STATUS: Record<string, number> = {
-  task_not_found: 404,
-  agent_not_found: 404,
-  not_found: 404,
-  invalid_status: 400,
-  // Catalog extensions (unregistered upstream; register with 18).
-  invalid_cursor: 400,
-  invalid_request: 400,
-  already_assigned: 409,
-  not_assigned: 400,
-  task_already_claimed: 409,
-  version_mismatch: 409,
-  unauthorized: 403,
-  name_taken: 409,
-  invalid_role: 400,
-  invalid_token: 401,
-};
-
-/**
- * Map a known service error to its catalog response and log nothing
- * (domain failures are client behavior, not incidents); unknown
- * errors rethrow so the server's request_error catch logs them.
- */
-function mapServiceError(res: ServerResponse, err: unknown): void {
-  if (err instanceof Error && err.name === "SqliteError") {
-    sendJson(res, 503, { error: "database_error" });
-    return;
-  }
-  const code = (err as { code?: string } | undefined)?.code;
-  if (typeof code === "string" && CATALOG_STATUS[code] !== undefined) {
-    sendJson(res, CATALOG_STATUS[code], { error: code });
-    return;
-  }
-  throw err;
 }
 
 /** Paginated reads share the limiting grammar: default 50, max 500. */

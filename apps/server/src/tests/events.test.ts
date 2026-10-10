@@ -362,6 +362,37 @@ describe("fleet events WebSocket (component 21)", () => {
     }
   });
 
+  it("upgrade spam exhausts the handshake budget and fails closed", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-events-"),
+    });
+    try {
+      // No login on this server: the per-IP budget (5) is untouched.
+      // Five handshakes reach validation (4401 each); the sixth never
+      // upgrades — the socket is destroyed instead of billed.
+      for (let i = 0; i < 5; i += 1) {
+        const socket = new WebSocket(wsUrl(app, "?csrf=nope"), {
+          headers: { origin: app.url },
+        });
+        socket.on("error", () => {
+          // Destroyed sockets surface ECONNRESET; the close code
+          // below is what the test asserts.
+        });
+        expect((await waitForClose(socket)).code).toBe(4401);
+      }
+      const spammer = new WebSocket(wsUrl(app, "?csrf=nope"), {
+        headers: { origin: app.url },
+      });
+      spammer.on("error", () => {
+        // Expected: the budget-exhausted upgrade is destroyed.
+      });
+      const code = await waitForClose(spammer);
+      expect(code.code).not.toBe(4401);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("logout, revocation, and rotation close live sockets with 4401; disable does not", async () => {
     const app = await listen("127.0.0.1", 0, {
       databasePath: tempDbPath("polymer-events-"),
@@ -382,7 +413,10 @@ describe("fleet events WebSocket (component 21)", () => {
       const closeA = waitForClose(socketA);
       const logout = await fetch(`${app.url}/api/auth/logout`, {
         method: "POST",
-        headers: { cookie: `__Host-polymer_admin=${a.cookie}` },
+        headers: {
+          cookie: `__Host-polymer_admin=${a.cookie}`,
+          "x-csrf-token": a.csrf,
+        },
       });
       expect(logout.status).toBe(200);
       expect((await closeA).code).toBe(4401);
