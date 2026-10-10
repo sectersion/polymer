@@ -137,6 +137,19 @@ ALTER TABLE credentials ADD COLUMN csrf TEXT NULL;`,
     down: `DROP TABLE IF EXISTS audit_log;
 ALTER TABLE credentials DROP COLUMN csrf;`,
   },
+  {
+    version: 7,
+    name: "007_otel_spans",
+    up: `CREATE TABLE otel_spans (
+  span_id TEXT PRIMARY KEY,
+  trace_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL REFERENCES agents(agent_id),
+  name TEXT NOT NULL DEFAULT '',
+  ingested_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_otel_spans_trace ON otel_spans(trace_id);`,
+    down: `DROP TABLE IF EXISTS otel_spans;`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

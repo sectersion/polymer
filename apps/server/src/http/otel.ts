@@ -3,6 +3,7 @@ import type { PolymerDatabase } from "../database/db.js";
 import { extractBearerToken } from "../identity/auth.js";
 import { verifySessionToken } from "../identity/credentials.js";
 import { OtelError, parseOtlpBatch } from "../telemetry/otlp.js";
+import type { QueuedBatch } from "../telemetry/queue.js";
 import { readRawBody, sendJson } from "./common.js";
 
 export interface OtelOptions {
@@ -36,6 +37,9 @@ function basePath(endpoint: string): string {
  * component 23 decides what acceptance means for storage). The agent
  * identity comes from the Bearer credential alone — resource
  * attributes in the payload are never consulted for identity.
+ * Per-agent quotas are deferred: the design names them but gives no
+ * numbers, and the shared queue bound is the backpressure mechanism
+ * until they land.
  */
 export async function handleOtlpRequest(
   req: IncomingMessage,
@@ -43,6 +47,7 @@ export async function handleOtlpRequest(
   url: URL,
   db: PolymerDatabase | null,
   options: OtelOptions,
+  enqueue: (batch: QueuedBatch) => boolean,
 ): Promise<boolean> {
   if (url.pathname !== `${basePath(options.endpoint)}/v1/traces`) {
     return false;
@@ -60,7 +65,8 @@ export async function handleOtlpRequest(
     return true;
   }
   const token = extractBearerToken(req.headers["authorization"]);
-  if (token === undefined || !verifySessionToken(db, token).ok) {
+  const session = token === undefined ? null : verifySessionToken(db, token);
+  if (session === null || !session.ok) {
     sendJson(res, 401, { error: "invalid_token" });
     return true;
   }
@@ -70,11 +76,22 @@ export async function handleOtlpRequest(
     return true;
   }
   try {
-    parseOtlpBatch(
+    const parsed = parseOtlpBatch(
       req.headers["content-type"],
       body.bytes,
       options.batchMaxSpans,
     );
+    // 200 acknowledges validation + enqueue only, never the commit.
+    // A full queue answers 429 + retry_after (backpressure, not loss).
+    const queued = enqueue({
+      agentId: session.principal.agentId,
+      spans: parsed.spans,
+      receivedAt: new Date().toISOString(),
+    });
+    if (!queued) {
+      sendJson(res, 429, { error: "rate_limit_exceeded", retry_after: 60 });
+      return true;
+    }
   } catch (err) {
     if (err instanceof OtelError) {
       const status = err.code === "payload_too_large" ? 413 : 400;
@@ -88,8 +105,8 @@ export async function handleOtlpRequest(
     }
     throw err;
   }
-  // 200: validated. Storage (and its 503/429 semantics) arrives with
-  // the queue (23) and span tables (24).
+  // 200: validated + enqueued. Storage (and its 429-from-full
+  // semantics) is the queue above; span tables arrive in 24.
   res.writeHead(200, { "content-length": 0 });
   res.end();
   return true;

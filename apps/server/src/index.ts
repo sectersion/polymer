@@ -43,9 +43,10 @@ function main(): void {
       const { resolveDatabasePath, getSchemaVersion, closeDatabase } =
         await import("./database/db.js");
       const dbPath = resolveDatabasePath();
-      const { server, db, closeSessions } = await createPolymerServer({
-        databasePath: dbPath,
-      });
+      const { server, db, closeSessions, closeTelemetry } =
+        await createPolymerServer({
+          databasePath: dbPath,
+        });
       // Component 19: first-run master bootstrap — the plaintext is
       // displayed to the operator once and never persisted.
       const { bootstrapMasterCredential } = await import("./http/admin.js");
@@ -76,6 +77,7 @@ function main(): void {
           .finally(() => {
             server.close(() => {
               try {
+                closeTelemetry();
                 if (db) closeDatabase(db);
               } finally {
                 process.exit(0);

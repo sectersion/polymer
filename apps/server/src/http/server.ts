@@ -11,6 +11,7 @@ import { attachUpgrade, EventBus, REVALIDATE_INTERVAL_MS } from "./events.js";
 import { WebSocketServer } from "ws";
 import { createAdminLimiters, handleAdminRequest } from "./admin.js";
 import { DEFAULT_OTEL_OPTIONS, handleOtlpRequest } from "./otel.js";
+import { TelemetryQueue } from "../telemetry/queue.js";
 import { handleRestRequest } from "./rest.js";
 import { extractBearerToken } from "../identity/auth.js";
 import {
@@ -38,6 +39,9 @@ export interface PolymerServer {
   /** End all live MCP sessions (used on shutdown so open SSE streams
    * do not hold `server.close()` open). */
   closeSessions: () => Promise<void>;
+  /** Stop the telemetry timer and flush what is queued. Runs before
+   * the database closes so a clean shutdown loses nothing buffered. */
+  closeTelemetry: () => void;
 }
 
 export interface PolymerServerOptions {
@@ -70,6 +74,10 @@ export interface PolymerServerOptions {
   telemetryMaxRequestBytes?: number;
   /** Component 22: max spans accepted per OTLP batch (default 500). */
   telemetryBatchMaxSpans?: number;
+  /** Component 23: max batches held in memory (default 100). */
+  telemetryQueueMaxBatches?: number;
+  /** Component 23: flush interval in ms (default 1000). */
+  telemetryBatchFlushMs?: number;
   /** Component 21: session-revalidation tick in ms (default 60s). A
    * backstop for missed events and crash recovery only — revocation
    * closes sockets immediately, never via this timer. */
@@ -137,6 +145,14 @@ export async function createPolymerServer(
   // Admin budgets: login 5/min per IP + server-global 30/min, admin
   // ops 10/min per session — per-server instances, same as above.
   const adminLimiters = createAdminLimiters();
+  // Component 23: the bounded telemetry queue. One per server; the
+  // OTLP handler enqueues validated batches and the timer flushes
+  // them to SQLite. Unref'd so tests never hang on the handle.
+  const telemetryQueue = new TelemetryQueue(db, {
+    maxBatches: options.telemetryQueueMaxBatches ?? 100,
+    flushMs: options.telemetryBatchFlushMs ?? 1000,
+  });
+  telemetryQueue.start();
   // Component 21: the fleet event bus. One per server; passed to
   // every mutation surface (MCP tools + admin REST) so task, agent,
   // and comment changes publish to live admin sockets. Upgrade
@@ -314,16 +330,24 @@ export async function createPolymerServer(
       // auth, own limits). Checked before /api/ so the telemetry
       // endpoint can never collide with a coordination route.
       if (
-        await handleOtlpRequest(req, res, url, db, {
-          endpoint: options.telemetryEndpoint ?? DEFAULT_OTEL_OPTIONS.endpoint,
-          enabled: options.telemetryEnabled ?? DEFAULT_OTEL_OPTIONS.enabled,
-          maxRequestBytes:
-            options.telemetryMaxRequestBytes ??
-            DEFAULT_OTEL_OPTIONS.maxRequestBytes,
-          batchMaxSpans:
-            options.telemetryBatchMaxSpans ??
-            DEFAULT_OTEL_OPTIONS.batchMaxSpans,
-        })
+        await handleOtlpRequest(
+          req,
+          res,
+          url,
+          db,
+          {
+            endpoint:
+              options.telemetryEndpoint ?? DEFAULT_OTEL_OPTIONS.endpoint,
+            enabled: options.telemetryEnabled ?? DEFAULT_OTEL_OPTIONS.enabled,
+            maxRequestBytes:
+              options.telemetryMaxRequestBytes ??
+              DEFAULT_OTEL_OPTIONS.maxRequestBytes,
+            batchMaxSpans:
+              options.telemetryBatchMaxSpans ??
+              DEFAULT_OTEL_OPTIONS.batchMaxSpans,
+          },
+          (batch) => telemetryQueue.enqueue(batch),
+        )
       ) {
         return;
       }
@@ -571,7 +595,17 @@ export async function createPolymerServer(
     });
   }
 
-  return { server, db, closeSessions };
+  const closeTelemetry = (): void => {
+    telemetryQueue.stop();
+    try {
+      telemetryQueue.flush();
+    } catch (err) {
+      // Best effort on the way out; the process is exiting anyway.
+      console.error("telemetry final flush failed:", err);
+    }
+  };
+
+  return { server, db, closeSessions, closeTelemetry };
 }
 
 function isInitializeCall(body: unknown): boolean {
@@ -613,10 +647,11 @@ export async function listen(
   port = 0,
   options: PolymerServerOptions = {},
 ): Promise<ListeningServer> {
-  const { server, db, closeSessions } = await createPolymerServer({
-    ...options,
-    listenHost: host,
-  });
+  const { server, db, closeSessions, closeTelemetry } =
+    await createPolymerServer({
+      ...options,
+      listenHost: host,
+    });
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
   const address = server.address();
   const actualPort =
@@ -625,9 +660,13 @@ export async function listen(
     server,
     db: db as ListeningServer["db"],
     closeSessions,
+    closeTelemetry,
     url: `http://${host}:${actualPort}`,
     close: async () => {
       await closeSessions();
+      // Drain telemetry before the database closes: a clean shutdown
+      // commits what a crash would lose (component 23's contract).
+      closeTelemetry();
       await new Promise<void>((resolve, reject) =>
         server.close((err) => {
           if (db) {
