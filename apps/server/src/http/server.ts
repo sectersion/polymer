@@ -10,6 +10,7 @@ import { MCP_PATH, createMcpServer } from "../mcp/index.js";
 import { attachUpgrade, EventBus, REVALIDATE_INTERVAL_MS } from "./events.js";
 import { WebSocketServer } from "ws";
 import { createAdminLimiters, handleAdminRequest } from "./admin.js";
+import { DEFAULT_OTEL_OPTIONS, handleOtlpRequest } from "./otel.js";
 import { handleRestRequest } from "./rest.js";
 import { extractBearerToken } from "../identity/auth.js";
 import {
@@ -61,6 +62,14 @@ export interface PolymerServerOptions {
    * admin claim route answers 403. Full POLYMER.json wiring arrives
    * with its component; this option is the gate until then. */
   adminClaimEnabled?: boolean;
+  /** Component 22: OTLP base path (default "/otel"; full ingest path
+   * is `<base>/v1/traces`). Disabled entirely when `false`. */
+  telemetryEndpoint?: string;
+  telemetryEnabled?: boolean;
+  /** Component 22: raw byte cap per OTLP request (default 10 MiB). */
+  telemetryMaxRequestBytes?: number;
+  /** Component 22: max spans accepted per OTLP batch (default 500). */
+  telemetryBatchMaxSpans?: number;
   /** Component 21: session-revalidation tick in ms (default 60s). A
    * backstop for missed events and crash recovery only — revocation
    * closes sockets immediately, never via this timer. */
@@ -297,6 +306,25 @@ export async function createPolymerServer(
           }
           throw err;
         }
+        return;
+      }
+
+      // Component 22: authenticated OTLP ingestion, kept completely
+      // separate from the coordination APIs (own path prefix, own
+      // auth, own limits). Checked before /api/ so the telemetry
+      // endpoint can never collide with a coordination route.
+      if (
+        await handleOtlpRequest(req, res, url, db, {
+          endpoint: options.telemetryEndpoint ?? DEFAULT_OTEL_OPTIONS.endpoint,
+          enabled: options.telemetryEnabled ?? DEFAULT_OTEL_OPTIONS.enabled,
+          maxRequestBytes:
+            options.telemetryMaxRequestBytes ??
+            DEFAULT_OTEL_OPTIONS.maxRequestBytes,
+          batchMaxSpans:
+            options.telemetryBatchMaxSpans ??
+            DEFAULT_OTEL_OPTIONS.batchMaxSpans,
+        })
+      ) {
         return;
       }
 

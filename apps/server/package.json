@@ -17,6 +17,10 @@
     "migrate:reset": "tsx src/database/migrate.ts reset"
   },
   "devDependencies": {
+    "@opentelemetry/core": "^2.12.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.223.0",
+    "@opentelemetry/resources": "^2.12.0",
+    "@opentelemetry/sdk-trace-node": "^2.12.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.4",
     "@types/ws": "^8.18.2",
