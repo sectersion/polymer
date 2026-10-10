@@ -7,3 +7,7 @@ coverage
 apps/web/.next
 apps/web/out
 pnpm-debug.log*
+
+# Next.js generated
+apps/web/next-env.d.ts
+apps/web/.next/
