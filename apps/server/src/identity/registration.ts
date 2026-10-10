@@ -30,6 +30,7 @@ export class RegistrationError extends Error {
       | "token_expired"
       | "token_already_used"
       | "name_taken"
+      | "parent_disabled"
       | "rate_limit_exceeded",
     readonly retryAfter?: number,
   ) {
@@ -150,6 +151,15 @@ export function registerSubagent(
     .get(callerAgentId) as { agent_id: string } | undefined;
   if (!caller) throw new Error("unknown caller agent");
   const txn = db.transaction((): RegisterSubagentOutput => {
+    // Freeze-first: a disabled parent rejects the spawn in the same
+    // transaction as the insert, so concurrent spawns cannot escape
+    // the enumerated disable set.
+    const parent = db
+      .prepare("SELECT status FROM agents WHERE agent_id = ?")
+      .get(callerAgentId) as { status: string } | undefined;
+    if (parent?.status === "disabled") {
+      throw new RegistrationError("parent_disabled");
+    }
     let childId: string;
     try {
       const child = createAgent(db, {

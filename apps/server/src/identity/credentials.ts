@@ -7,7 +7,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import type { PolymerDatabase } from "../database/db.js";
-
+import { recordAudit } from "./audit.js";
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const RECONNECT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -32,6 +32,10 @@ export interface Credential {
   expires_at: string | null;
   last_used_at: string | null;
   rotated_from_credential_id: string | null;
+  /** Admin sessions only: the session's CSRF token (row-held per the
+   * cookie/CSRF contract: returned by GET /api/auth/csrf and compared
+   * constant-time; never logged). */
+  csrf: string | null;
 }
 
 export interface MintCredentialInput {
@@ -119,11 +123,13 @@ function toCredential(row: Record<string, unknown>): Credential {
     last_used_at: (row["last_used_at"] as string | null) ?? null,
     rotated_from_credential_id:
       (row["rotated_from_credential_id"] as string | null) ?? null,
+    csrf: (row["csrf"] as string | null) ?? null,
   };
 }
 
 const RETURNING = `credential_id, public_id, type, token_hash, agent_id,
-  status, created_at, expires_at, last_used_at, rotated_from_credential_id`;
+  status, created_at, expires_at, last_used_at,
+  rotated_from_credential_id, csrf`;
 
 /** Design `auth.initTokenExpiry`: a minted init OTP is single-use and
  * lives 10 minutes unless the mint is given an explicit expiry. */
@@ -396,4 +402,129 @@ export function refreshReconnect(
     };
   });
   return txn();
+}
+
+export const ADMIN_SESSION_EXPIRY_SECONDS = 28800; // absolute, 8 hours
+
+/** Does the fleet already have an active master credential? */
+export function masterBootstrapped(db: PolymerDatabase): boolean {
+  const row = db
+    .prepare(
+      `SELECT credential_id FROM credentials WHERE type = 'master' LIMIT 1`,
+    )
+    .get() as { credential_id: string } | undefined;
+  return row !== undefined;
+}
+
+/**
+ * Component 19: first-run master bootstrap. Generates a high-entropy
+ * master credential, persists only its scrypt PHC (agent_id NULL by
+ * design — the master is no agent), and returns the plaintext ONCE for
+ * the operator to save. The caller displays it; nothing else may.
+ */
+export function bootstrapMaster(db: PolymerDatabase): string | undefined {
+  if (masterBootstrapped(db)) return undefined;
+  const secret = generateMachineSecret();
+  const row = db
+    .prepare(
+      `INSERT INTO credentials
+         (credential_id, public_id, type, token_hash, agent_id, status)
+       VALUES (?, NULL, 'master', ?, NULL, 'active')`,
+    )
+    .run(randomUUID(), scryptHash(secret));
+  if (row.changes !== 1) throw new Error("master bootstrap insert failed");
+  return secret;
+}
+
+export interface AdminSession {
+  /** The full `<publicId>.<secret>` token for the __Host-polymer_admin cookie. */
+  token: string;
+  credential_id: string;
+  csrf_token: string;
+  expires_in: number;
+  expires_at: string;
+}
+
+/**
+ * Component 19: mint an administrator browser session — 256-bit
+ * credential (SHA-256 at rest), a 256-bit CSRF token row-held in the
+ * session row for constant-time comparison, and an ABSOLUTE 8h expiry
+ * (no sliding).
+ */
+export function createAdminSession(db: PolymerDatabase): AdminSession {
+  const tokenSecret = generateMachineSecret();
+  const publicId = randomBytes(8).toString("hex");
+  const token = `${publicId}.${tokenSecret}`;
+  const csrfToken = generateMachineSecret();
+  const expiresAt = new Date(
+    Date.now() + ADMIN_SESSION_EXPIRY_SECONDS * 1000,
+  ).toISOString();
+  const credentialId = randomUUID();
+  const row = db
+    .prepare(
+      `INSERT INTO credentials
+         (credential_id, public_id, type, token_hash, agent_id, status, expires_at, csrf)
+       VALUES (?, ?, 'admin_session', ?, NULL, 'active', ?, ?)`,
+    )
+    .run(credentialId, publicId, sha256Hex(token), expiresAt, csrfToken);
+  if (row.changes !== 1) throw new Error("admin session insert failed");
+  return {
+    token,
+    credential_id: credentialId,
+    csrf_token: csrfToken,
+    expires_in: ADMIN_SESSION_EXPIRY_SECONDS,
+    expires_at: expiresAt,
+  };
+}
+
+/** The session's CSRF token, for constant-time comparison at the HTTP layer. */
+export function getAdminCsrf(
+  db: PolymerDatabase,
+  credentialId: string,
+): string | undefined {
+  const cred = getCredentialById(db, credentialId);
+  if (cred === undefined || cred.type !== "admin_session") return undefined;
+  return cred.csrf ?? undefined;
+}
+
+export interface RotateMasterResult {
+  master_credential: string;
+  rotated_at: string;
+}
+
+/**
+ * Component 19: replace the master hash atomically, revoke EVERY live
+ * admin session (a stolen session does not survive rotation — live
+ * WebSocket close is component 21's half), and write the audit row.
+ * The plaintext is returned once.
+ */
+export function rotateMaster(
+  db: PolymerDatabase,
+  actorSessionId: string,
+): RotateMasterResult {
+  const rotate = db.transaction(() => {
+    const secret = generateMachineSecret();
+    const replaced = db
+      .prepare(
+        `UPDATE credentials
+            SET token_hash = ?, status = 'active'
+          WHERE type = 'master'`,
+      )
+      .run(scryptHash(secret));
+    if (replaced.changes !== 1) {
+      throw new Error("no master credential to rotate");
+    }
+    db.prepare(
+      `UPDATE credentials SET status = 'revoked'
+        WHERE type = 'admin_session' AND status = 'active'`,
+    ).run();
+    const rotated_at = new Date().toISOString();
+    recordAudit(db, {
+      actor_type: "admin_session",
+      actor_id: actorSessionId,
+      action: "master.rotated",
+    });
+    return { master_credential: secret, rotated_at };
+  });
+  return rotate.immediate();
 }

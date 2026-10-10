@@ -46,6 +46,10 @@ function main(): void {
       const { server, db, closeSessions } = await createPolymerServer({
         databasePath: dbPath,
       });
+      // Component 19: first-run master bootstrap — the plaintext is
+      // displayed to the operator once and never persisted.
+      const { bootstrapMasterCredential } = await import("./http/admin.js");
+      bootstrapMasterCredential(db!, (line) => console.error(line));
       server.listen(port, host, () => {
         console.log(`polymer server ready on ${host}:${port}`);
         if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1") {

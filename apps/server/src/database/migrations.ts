@@ -118,6 +118,25 @@ CREATE INDEX IF NOT EXISTS idx_mentions_agent ON mentions(mentioned_agent_id, re
     down: `DROP TABLE IF EXISTS mentions;
 DROP TABLE IF EXISTS comments;`,
   },
+  {
+    version: 6,
+    name: "006_audit",
+    up: `CREATE TABLE audit_log (
+  audit_id TEXT PRIMARY KEY,
+  actor_type TEXT NOT NULL
+    CHECK(actor_type IN ('admin_session', 'master', 'system')),
+  actor_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  task_id TEXT NULL REFERENCES tasks(task_id),
+  before TEXT NULL,
+  after TEXT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_audit_task_time ON audit_log(task_id, created_at);
+ALTER TABLE credentials ADD COLUMN csrf TEXT NULL;`,
+    down: `DROP TABLE IF EXISTS audit_log;
+ALTER TABLE credentials DROP COLUMN csrf;`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

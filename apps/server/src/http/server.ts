@@ -7,6 +7,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { MCP_PATH, createMcpServer } from "../mcp/index.js";
+import { createAdminLimiters, handleAdminRequest } from "./admin.js";
 import { handleRestRequest } from "./rest.js";
 import { extractBearerToken } from "../identity/auth.js";
 import {
@@ -37,6 +38,9 @@ export interface PolymerServer {
 
 export interface PolymerServerOptions {
   databasePath?: string;
+  /** The host this server will be bound to (loopback default): drives
+   * the Secure-flag requirement on the admin session cookie. */
+  listenHost?: string;
   /** MCP requests/min per agent and per source IP for anonymous
    * `initialize` handshakes. Design default 100 (tune with usage). */
   mcpRateLimitPerMin?: number;
@@ -50,6 +54,10 @@ export interface PolymerServerOptions {
   /** Component 14: register test-only MCP probe tools. Default false —
    * probes never ship in production builds. */
   testSeams?: boolean;
+  /** Design `ui.adminClaimEnabled` (default true): when false, the
+   * admin claim route answers 403. Full POLYMER.json wiring arrives
+   * with its component; this option is the gate until then. */
+  adminClaimEnabled?: boolean;
 }
 
 interface McpSession {
@@ -168,6 +176,9 @@ export async function createPolymerServer(
   const mcpLimiter = new McpLimiter(options.mcpRateLimitPerMin ?? 100);
   const maxSessions = options.mcpMaxSessions ?? 1000;
   const sessionIdleMs = options.mcpSessionIdleMs ?? 30 * 60_000;
+  // Admin budgets: login 5/min per IP + server-global 30/min, admin
+  // ops 10/min per session — per-server instances, same as above.
+  const adminLimiters = createAdminLimiters();
   // One transport + McpServer per MCP client session. The stateful
   // transport accepts exactly one `initialize` for its lifetime, so a
   // single shared instance would let the first client — even an
@@ -327,6 +338,23 @@ export async function createPolymerServer(
       }
 
       if (url.pathname.startsWith("/api/")) {
+        // Component 19 owns the admin auth + mutation surface; it
+        // answers only its own paths, leaving everything else to the
+        // component-18 read routes (and their 405/404 layers).
+        if (
+          db !== null &&
+          handleAdminRequest(
+            req,
+            res,
+            url,
+            db,
+            options.listenHost ?? "127.0.0.1",
+            adminLimiters,
+            options.adminClaimEnabled ?? true,
+          )
+        ) {
+          return;
+        }
         // Component 18: the read-only REST surface (admin session
         // cookie). /api/tokens/refresh above stays first: it has its
         // own reconnect-Bearer contract with no session.
@@ -559,7 +587,10 @@ export async function listen(
   port = 0,
   options: PolymerServerOptions = {},
 ): Promise<ListeningServer> {
-  const { server, db, closeSessions } = await createPolymerServer(options);
+  const { server, db, closeSessions } = await createPolymerServer({
+    ...options,
+    listenHost: host,
+  });
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
   const address = server.address();
   const actualPort =

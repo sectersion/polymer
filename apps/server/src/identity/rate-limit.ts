@@ -95,3 +95,26 @@ export class McpLimiter extends FixedWindowLimiter {
     super(perKeyLimit, Number.POSITIVE_INFINITY, windowMs, now);
   }
 }
+
+/**
+ * Component 19: login (and rotate-master) budgets, "brutally": 5
+ * req/min per IP plus a server-global 30/min. Consumed BEFORE the
+ * master credential is touched, so attackers cannot probe faster than
+ * the bucket allows.
+ */
+export class LoginLimiter extends FixedWindowLimiter {
+  constructor(windowMs = 60_000, now: () => number = Date.now) {
+    super(5, 30, windowMs, now);
+  }
+}
+
+/**
+ * Component 19: general administrator operations budget, 10 req/min
+ * per administrator session (init-token mint sits under this
+ * budget by the design's rate-limiting table).
+ */
+export class AdminOpsLimiter extends FixedWindowLimiter {
+  constructor(windowMs = 60_000, now: () => number = Date.now) {
+    super(10, Number.POSITIVE_INFINITY, windowMs, now);
+  }
+}

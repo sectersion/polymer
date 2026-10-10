@@ -60,7 +60,7 @@ function toComment(row: Record<string, unknown>): Comment {
 export interface PostCommentResult {
   comment_id: string;
   task_id: string;
-  sender_agent_id: string;
+  sender_agent_id: string | null;
   content: string;
   mentions: string[];
   trace_parent: string | null;
@@ -81,9 +81,11 @@ function resolveMentions(db: PolymerDatabase, content: string): string[] {
 export function postComment(
   db: PolymerDatabase,
   taskId: string,
-  senderAgentId: string,
+  senderAgentId: string | null,
   content: string,
   traceParent?: string,
+  /** Component 19: human senders are administrators posting from REST. */
+  senderType: "agent" | "human" = "agent",
 ): PostCommentResult {
   const post = db.transaction(() => {
     if (getTask(db, taskId) === undefined) {
@@ -94,8 +96,16 @@ export function postComment(
     db.prepare(
       `INSERT INTO comments
          (comment_id, task_id, sender_agent_id, sender_type, content, trace_parent, created_at)
-       VALUES (?, ?, ?, 'agent', ?, ?, ?)`,
-    ).run(commentId, taskId, senderAgentId, content, traceParent ?? null, now);
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      commentId,
+      taskId,
+      senderAgentId,
+      senderType,
+      content,
+      traceParent ?? null,
+      now,
+    );
     const mentions = resolveMentions(db, content);
     for (const mentionedAgentId of mentions) {
       db.prepare(

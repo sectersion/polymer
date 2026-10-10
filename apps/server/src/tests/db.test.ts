@@ -73,12 +73,12 @@ describe("SQLite connection and migrations (component 4)", () => {
     const path = tempDbPath();
     const first = openDatabase(path);
     openHandles.push(first);
-    expect(getAppliedVersions(first)).toEqual([1, 2, 3, 4, 5]);
+    expect(getAppliedVersions(first)).toEqual([1, 2, 3, 4, 5, 6]);
     closeDatabase(openHandles.pop()!);
     const second = openDatabase(path);
     openHandles.push(second);
-    expect(getAppliedVersions(second)).toEqual([1, 2, 3, 4, 5]);
-    expect(getSchemaVersion(second)).toBe(5);
+    expect(getAppliedVersions(second)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(getSchemaVersion(second)).toBe(6);
     const applied = migrateUp(second);
     expect(applied).toEqual([]);
   });
@@ -86,6 +86,18 @@ describe("SQLite connection and migrations (component 4)", () => {
   it("rollback removes the latest migration; up re-applies", () => {
     const db = openDatabase(tempDbPath());
     openHandles.push(db);
+    expect(migrateDown(db)).toBe(6);
+    expect(getSchemaVersion(db)).toBe(5);
+    expect(tableExists(db, "audit_log")).toBe(false);
+    // Rollback restores the exact v5 shape: the csrf column leaves too.
+    const columns = db
+      .prepare("PRAGMA table_info(credentials)")
+      .all() as Array<{ name: string }>;
+    expect(columns.map((c) => c.name)).not.toContain("csrf");
+    expect(tableExists(db, "comments")).toBe(true);
+    expect(tableExists(db, "tasks")).toBe(true);
+    expect(tableExists(db, "task_assignments")).toBe(true);
+    expect(tableExists(db, "credentials")).toBe(true);
     expect(migrateDown(db)).toBe(5);
     expect(getSchemaVersion(db)).toBe(4);
     expect(tableExists(db, "comments")).toBe(false);
@@ -97,7 +109,6 @@ describe("SQLite connection and migrations (component 4)", () => {
     expect(getSchemaVersion(db)).toBe(3);
     expect(tableExists(db, "tasks")).toBe(false);
     expect(tableExists(db, "task_assignments")).toBe(false);
-    expect(tableExists(db, "credentials")).toBe(true);
     expect(migrateDown(db)).toBe(3);
     expect(getSchemaVersion(db)).toBe(2);
     expect(tableExists(db, "credentials")).toBe(false);
@@ -110,7 +121,7 @@ describe("SQLite connection and migrations (component 4)", () => {
     expect(getSchemaVersion(db)).toBe(0);
     expect(tableExists(db, "_migration_probe")).toBe(false);
     expect(migrateDown(db)).toBeNull();
-    expect(migrateUp(db)).toEqual([1, 2, 3, 4, 5]);
+    expect(migrateUp(db)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(tableExists(db, "_migration_probe")).toBe(true);
     expect(tableExists(db, "agents")).toBe(true);
     expect(tableExists(db, "credentials")).toBe(true);
