@@ -1,0 +1,5 @@
+import { proxyMutation } from "@/lib/proxy";
+
+export async function POST(): Promise<Response> {
+  return proxyMutation("/api/tokens/init", { body: {} });
+}
