@@ -27,6 +27,7 @@ export function disableAgentSubtree(
   db: PolymerDatabase,
   agentId: string,
   actorSessionId: string,
+  onBatch?: (newlyDisabledIds: string[]) => void,
 ): DisableResult {
   const root = db
     .prepare("SELECT agent_id FROM agents WHERE agent_id = ?")
@@ -52,12 +53,23 @@ export function disableAgentSubtree(
     const batch = ids.slice(i, i + DISABLE_BATCH_SIZE);
     const placeholders = batch.map(() => "?").join(",");
     const write = db.transaction(() => {
-      const disabled = db
+      // RETURNING reports exactly the rows this batch flipped, so
+      // callers can notify on real changes (idempotent retries flip
+      // nothing and notify nothing).
+      const flipped = db
         .prepare(
           `UPDATE agents SET status = 'disabled'
-            WHERE agent_id IN (${placeholders}) AND status != 'disabled'`,
+            WHERE agent_id IN (${placeholders}) AND status != 'disabled'
+            RETURNING agent_id`,
         )
-        .run(...batch);
+        .all(...batch) as Array<{ agent_id: string }>;
+      const disabled = { changes: flipped.length };
+      // NOTE: credentials are deliberately NOT revoked here. The
+      // spec requires spawns under a disabled parent to fail with
+      // parent_disabled from inside the insert transaction — which is
+      // only reachable while the disabled agent still authenticates.
+      // (Live admin sockets are unaffected by agent disable for the
+      // same reason: no admin session is tied to an agent.)
       // Lease release for the batch: coordinator kept for history,
       // lease nulled, generation bumped — claimable immediately.
       db.prepare(
@@ -77,6 +89,7 @@ export function disableAgentSubtree(
           disabled_agents: batch,
         },
       });
+      onBatch?.(flipped.map((r) => r.agent_id));
       return disabled.changes;
     });
     disabledCount += Number(write.immediate());

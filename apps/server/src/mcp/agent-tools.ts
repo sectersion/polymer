@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { PolymerDatabase } from "../database/db.js";
+import type { EventBus } from "../http/events.js";
 import { registerAgent, registerSubagent } from "../identity/registration.js";
 import {
   callerAgentId,
@@ -13,6 +14,7 @@ import {
 export function registerAgentTools(
   server: McpServer,
   db: PolymerDatabase | null,
+  events: EventBus,
 ): void {
   server.registerTool(
     "ping",
@@ -57,6 +59,11 @@ export function registerAgentTools(
           role: args.role,
           heartbeatTimeoutSeconds: args.heartbeat_timeout_seconds,
         });
+        events.publish("agent.status_changed", {
+          agent_id: out.agent_id,
+          name: args.name,
+          status: "connecting",
+        });
         return toolResult({ ...out });
       } catch (err) {
         registrationError(err);
@@ -87,6 +94,11 @@ export function registerAgentTools(
           name: args.name,
           role: args.role,
           heartbeatTimeoutSeconds: args.heartbeat_timeout_seconds,
+        });
+        events.publish("agent.status_changed", {
+          agent_id: out.agent_id,
+          name: args.name,
+          status: "connecting",
         });
         return toolResult({ ...out });
       } catch (err) {

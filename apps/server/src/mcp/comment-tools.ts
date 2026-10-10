@@ -2,6 +2,7 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { PolymerDatabase } from "../database/db.js";
+import type { EventBus } from "../http/events.js";
 import {
   COMMENT_PAGE_MAX,
   getComments,
@@ -23,6 +24,7 @@ import { callerAgentId, taskToolError, toolResult } from "./shared.js";
 export function registerCommentTools(
   server: McpServer,
   db: PolymerDatabase | null,
+  events: EventBus,
 ): void {
   server.registerTool(
     "post_comment",
@@ -54,6 +56,12 @@ export function registerCommentTools(
           args.content,
           args.trace_parent,
         );
+        events.publish("comment.created", {
+          comment_id: out.comment_id,
+          task_id: out.task_id,
+          sender_agent_id: out.sender_agent_id,
+          content: out.content,
+        });
         return toolResult({ ...out });
       } catch (err) {
         taskToolError(err);

@@ -63,6 +63,7 @@ function waitForOutput(
 
 describe("Fleet page (component 20)", () => {
   let adminCookie = "";
+  let agentToken = "";
 
   beforeAll(async () => {
     const backendPort = await freePort();
@@ -129,6 +130,7 @@ describe("Fleet page (component 20)", () => {
         },
       })) as { structuredContent: Record<string, unknown> };
       const sessionToken = reg.structuredContent["session_token"] as string;
+      agentToken = sessionToken;
       const authed = new Client({ name: "seed-authed", version: "0.0.0" });
       await authed.connect(
         new StreamableHTTPClientTransport(new URL(`${BACKEND_URL}/mcp`), {
@@ -153,7 +155,32 @@ describe("Fleet page (component 20)", () => {
       await client.close();
     }
 
-    // Boot the production web build against this backend.
+    // Boot the production web build against this backend. The
+    // build runs here (not just `next start` on a stale .next) so the
+    // test is hermetic: what it fetches is current sources.
+    const build = spawn("node", ["node_modules/next/dist/bin/next", "build"], {
+      cwd: WEB_DIR,
+      env: { ...process.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    await new Promise<void>((resolve, reject) => {
+      let out = "";
+      const timer = setTimeout(
+        () => reject(new Error(`next build timed out: ${out.slice(-500)}`)),
+        300000,
+      );
+      build.on("exit", (code) => {
+        clearTimeout(timer);
+        if (code === 0) resolve();
+        else reject(new Error(`next build exited ${code}: ${out.slice(-500)}`));
+      });
+      build.stderr?.on("data", (chunk: Buffer) => {
+        out += chunk.toString();
+      });
+      build.stdout?.on("data", (chunk: Buffer) => {
+        out += chunk.toString();
+      });
+    });
     web = spawn(
       "node",
       [
@@ -194,7 +221,45 @@ describe("Fleet page (component 20)", () => {
     // One agent, one task, one active (claimed) task.
     const counts = [...html.matchAll(/tabular-nums">(\d+)</g)].map((m) => m[1]);
     expect(counts).toEqual(["1", "1", "1"]);
+    // The live-region hook is wired: pushes and poll refreshes call
+    // router.refresh(), so the next navigation shows fresh state.
+    expect(html).toContain('data-testid="fleet-live"');
   });
+
+  it(
+    "shows newly created tasks on refetch without a manual reload",
+    { timeout: 60000 },
+    async () => {
+      const client = new Client({ name: "seed-late", version: "0.0.0" });
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(`${BACKEND_URL}/mcp`), {
+          requestInit: {
+            headers: { Authorization: `Bearer ${agentToken}` },
+          },
+        }),
+      );
+      try {
+        await client.callTool({
+          name: "create_task",
+          arguments: { title: "Late task" },
+        });
+      } finally {
+        await client.close();
+      }
+      // No browser refresh involved: a fresh navigation (what the poll
+      // fallback and push-driven router.refresh() both produce) shows
+      // the new task immediately.
+      const res = await fetch(`${WEB_URL}/`, {
+        headers: { cookie: adminCookie },
+      });
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      const counts = [...html.matchAll(/tabular-nums">(\d+)</g)].map(
+        (m) => m[1],
+      );
+      expect(counts).toEqual(["1", "2", "1"]);
+    },
+  );
 
   it(
     "redirects unauthenticated visitors to Login, which renders",

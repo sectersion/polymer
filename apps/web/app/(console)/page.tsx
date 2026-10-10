@@ -1,4 +1,5 @@
 import { fetchAgents, fetchTasks } from "@/lib/polymer";
+import { FleetLive } from "./fleet-live";
 
 function Card({
   label,
@@ -31,6 +32,7 @@ export default async function FleetPage(): Promise<React.JSX.Element> {
         <Card label="Tasks" value={tasks.length} />
         <Card label="Active" value={active} />
       </div>
+      <FleetLive />
     </div>
   );
 }

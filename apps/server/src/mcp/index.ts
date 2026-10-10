@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { VERSION } from "../index.js";
 import type { PolymerDatabase } from "../database/db.js";
+import type { EventBus } from "../http/events.js";
 import { registerAgentTools } from "./agent-tools.js";
 import { registerCommentTools } from "./comment-tools.js";
 import { registerProbeTool } from "./probe.js";
@@ -16,9 +17,14 @@ export interface McpServerOptions {
    * its component, this option is its gate seam until then.
    */
   testSeams: boolean;
+  /**
+   * Component 21: the fleet event bus. Mutation tools publish
+   * task/agent/comment changes to live admin sockets through it.
+   * Required in production; test servers that don't care about
+   * events pass a throwaway bus.
+   */
+  events: EventBus;
 }
-
-const DEFAULT_MCP_SERVER_OPTIONS: McpServerOptions = { testSeams: false };
 
 /**
  * The MCP surface: agent lifecycle tools, task tools sharing the
@@ -27,12 +33,12 @@ const DEFAULT_MCP_SERVER_OPTIONS: McpServerOptions = { testSeams: false };
  */
 export function createMcpServer(
   db: PolymerDatabase | null = null,
-  options: McpServerOptions = DEFAULT_MCP_SERVER_OPTIONS,
+  options: McpServerOptions,
 ): McpServer {
   const server = new McpServer({ name: "polymer", version: VERSION });
-  registerAgentTools(server, db);
-  registerTaskTools(server, db);
-  registerCommentTools(server, db);
+  registerAgentTools(server, db, options.events);
+  registerTaskTools(server, db, options.events);
+  registerCommentTools(server, db, options.events);
   if (options.testSeams) {
     registerProbeTool(server, db);
   }

@@ -17,6 +17,7 @@ import {
 import { listAudit } from "../identity/audit.js";
 import { disableAgentSubtree } from "../identity/disable.js";
 import { AdminOpsLimiter, LoginLimiter } from "../identity/rate-limit.js";
+import type { EventBus } from "./events.js";
 import {
   TASK_STATUSES,
   TASK_LEASE_DEFAULT_SECONDS,
@@ -250,6 +251,7 @@ export function handleAdminRequest(
   host: string,
   limiters: AdminLimiters,
   adminClaimEnabled: boolean,
+  events: EventBus,
 ): boolean {
   const { pathname } = url;
   if (!isAdminPath(pathname, req.method ?? "")) return false;
@@ -317,11 +319,12 @@ export function handleAdminRequest(
 
     if (pathname === "/api/auth/logout" && req.method === "POST") {
       // Delete the server-side session row; clear the cookie with
-      // attributes identical to how it was set. (Live WebSocket close
-      // is component 21's half.)
+      // attributes identical to how it was set. Live sockets for this
+      // session close in the same obligation (component 21).
       db.prepare("DELETE FROM credentials WHERE credential_id = ?").run(
         auth.credentialId,
       );
+      events.closeSocketsFor([auth.credentialId]);
       res.writeHead(200, {
         "content-type": "application/json",
         "set-cookie": cookieSetCookieHeader("", 0, host),
@@ -349,6 +352,9 @@ export function handleAdminRequest(
       void readBody(req)
         .then(() => {
           const out = rotateMaster(db, auth.credentialId);
+          // Rotation revokes every live admin session: close every
+          // live socket in the same obligation (component 21).
+          events.closeAll();
           sendJson(res, 200, out);
         })
         .catch((err: unknown) => mapServiceError(res, err));
@@ -386,6 +392,9 @@ export function handleAdminRequest(
         sendJson(res, 404, { error: "not_found" });
         return true;
       }
+      // If this was a live admin session, its sockets close now
+      // (agent credential ids simply have no tracked sockets).
+      events.closeSocketsFor([credentialId]);
       sendJson(res, 200, { success: true });
       return true;
     }
@@ -462,7 +471,23 @@ export function handleAdminRequest(
       // /api/agents/:id/disable — the id is everything between.
       const targetId = segments.slice(2, -1).join("/");
       // Unknown ids surface as agent_not_found via the catalog mapper.
-      const out = disableAgentSubtree(db, targetId, auth.credentialId);
+      // Status events publish per newly-disabled agent only, so an
+      // idempotent retry notifies nothing.
+      const newlyDisabled: string[] = [];
+      const out = disableAgentSubtree(
+        db,
+        targetId,
+        auth.credentialId,
+        (ids) => {
+          newlyDisabled.push(...ids);
+        },
+      );
+      for (const id of newlyDisabled) {
+        events.publish("agent.status_changed", {
+          agent_id: id,
+          status: "disabled",
+        });
+      }
       sendJson(res, 200, out);
       return true;
     }
@@ -515,6 +540,11 @@ export function handleAdminRequest(
               sendJson(res, 404, { error: "task_not_found" });
               return;
             }
+            events.publish("task.updated", {
+              task_id: taskId,
+              status: status as string,
+              version: detail.task.version,
+            });
             sendJson(res, 200, serializeTaskDetail(detail));
           })
           .catch((err: unknown) => mapServiceError(res, err));
@@ -546,6 +576,13 @@ export function handleAdminRequest(
                   ? (body["lease_duration_seconds"] as number)
                   : TASK_LEASE_DEFAULT_SECONDS,
               );
+              events.publish("task.updated", {
+                task_id: out.task_id,
+                status: out.status,
+                coordinator: out.coordinator,
+                version: out.version,
+                lease_generation: out.lease_generation,
+              });
               sendJson(res, 200, out);
               return;
             }
@@ -579,6 +616,11 @@ export function handleAdminRequest(
                 sendJson(res, 404, { error: "task_not_found" });
                 return;
               }
+              events.publish("task.updated", {
+                task_id: taskId,
+                change: "assigned",
+                version: detail.task.version,
+              });
               sendJson(res, 200, serializeTaskDetail(detail));
               return;
             }
@@ -609,6 +651,13 @@ export function handleAdminRequest(
                 sendJson(res, 404, { error: "task_not_found" });
                 return;
               }
+              events.publish("task.updated", {
+                task_id: taskId,
+                change: "transfer_coordinator",
+                coordinator: detail.task.coordinator,
+                version: detail.task.version,
+                lease_generation: detail.task.lease_generation,
+              });
               sendJson(res, 200, serializeTaskDetail(detail));
               return;
             }
@@ -635,6 +684,12 @@ export function handleAdminRequest(
                 traceParent,
                 "human",
               );
+              events.publish("comment.created", {
+                comment_id: out.comment_id,
+                task_id: out.task_id,
+                sender_agent_id: null,
+                content: out.content,
+              });
               sendJson(res, 200, { ...out, sender_agent_id: null });
               return;
             }

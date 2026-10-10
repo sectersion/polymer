@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { PolymerDatabase } from "../database/db.js";
+import type { EventBus } from "../http/events.js";
 import {
   TASK_STATUSES,
   assignTask,
@@ -21,6 +22,7 @@ import { callerAgentId, taskToolError, toolResult } from "./shared.js";
 export function registerTaskTools(
   server: McpServer,
   db: PolymerDatabase | null,
+  events: EventBus,
 ): void {
   server.registerTool(
     "create_task",
@@ -50,6 +52,13 @@ export function registerTaskTools(
           description: args.description,
           traceParent: args.trace_parent,
           createdBy: caller,
+        });
+        events.publish("task.created", {
+          task_id: task.task_id,
+          title: task.title,
+          status: task.status,
+          coordinator: task.coordinator,
+          version: task.version,
         });
         return toolResult({
           task_id: task.task_id,
@@ -94,6 +103,13 @@ export function registerTaskTools(
           caller,
           args.lease_duration_seconds,
         );
+        events.publish("task.updated", {
+          task_id: out.task_id,
+          status: out.status,
+          coordinator: out.coordinator,
+          version: out.version,
+          lease_generation: out.lease_generation,
+        });
         return toolResult({ ...out });
       } catch (err) {
         taskToolError(err);
@@ -205,6 +221,13 @@ export function registerTaskTools(
           args.lease_generation,
           args.expected_version,
         );
+        events.publish("task.updated", {
+          task_id: out.task_id,
+          change: "assigned",
+          assigned_to: out.assigned_to,
+          version: out.version,
+          lease_generation: out.lease_generation,
+        });
         return toolResult({ ...out });
       } catch (err) {
         taskToolError(err);
@@ -242,6 +265,13 @@ export function registerTaskTools(
           args.expected_version,
           args.lease_duration_seconds,
         );
+        events.publish("task.updated", {
+          task_id: out.task_id,
+          change: "transfer_coordinator",
+          coordinator: out.coordinator,
+          version: out.version,
+          lease_generation: out.lease_generation,
+        });
         return toolResult({ ...out });
       } catch (err) {
         taskToolError(err);
@@ -303,6 +333,11 @@ export function registerTaskTools(
           args.lease_generation,
           args.expected_version,
         );
+        events.publish("task.updated", {
+          task_id: out.task_id,
+          status: out.status,
+          version: out.version,
+        });
         return toolResult({ ...out });
       } catch (err) {
         taskToolError(err);

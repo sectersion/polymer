@@ -7,6 +7,8 @@ import {
 import { randomUUID } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { MCP_PATH, createMcpServer } from "../mcp/index.js";
+import { attachUpgrade, EventBus, REVALIDATE_INTERVAL_MS } from "./events.js";
+import { WebSocketServer } from "ws";
 import { createAdminLimiters, handleAdminRequest } from "./admin.js";
 import { handleRestRequest } from "./rest.js";
 import { extractBearerToken } from "../identity/auth.js";
@@ -58,6 +60,10 @@ export interface PolymerServerOptions {
    * admin claim route answers 403. Full POLYMER.json wiring arrives
    * with its component; this option is the gate until then. */
   adminClaimEnabled?: boolean;
+  /** Component 21: session-revalidation tick in ms (default 60s). A
+   * backstop for missed events and crash recovery only — revocation
+   * closes sockets immediately, never via this timer. */
+  eventsRevalidateMs?: number;
 }
 
 interface McpSession {
@@ -179,7 +185,18 @@ export async function createPolymerServer(
   // Admin budgets: login 5/min per IP + server-global 30/min, admin
   // ops 10/min per session — per-server instances, same as above.
   const adminLimiters = createAdminLimiters();
-  // One transport + McpServer per MCP client session. The stateful
+  // Component 21: the fleet event bus. One per server; passed to
+  // every mutation surface (MCP tools + admin REST) so task, agent,
+  // and comment changes publish to live admin sockets. Upgrade
+  // wiring happens after the HTTP server exists (see below).
+  const events = new EventBus();
+  const wss = new WebSocketServer({ noServer: true });
+  if (db !== null) {
+    events.startRevalidation(
+      db,
+      options.eventsRevalidateMs ?? REVALIDATE_INTERVAL_MS,
+    );
+  }
   // transport accepts exactly one `initialize` for its lifetime, so a
   // single shared instance would let the first client — even an
   // unauthenticated one — consume the only session slot and wedge /mcp
@@ -194,6 +211,7 @@ export async function createPolymerServer(
   ): Promise<StreamableHTTPServerTransport> {
     const sessionServer = createMcpServer(db, {
       testSeams: options.testSeams ?? false,
+      events,
     });
     const sessionTransport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
@@ -240,6 +258,8 @@ export async function createPolymerServer(
   };
 
   const closeSessions = async (): Promise<void> => {
+    events.stopRevalidation();
+    events.closeAll();
     for (const session of sessions.values()) {
       try {
         await session.transport.close();
@@ -351,6 +371,7 @@ export async function createPolymerServer(
             options.listenHost ?? "127.0.0.1",
             adminLimiters,
             options.adminClaimEnabled ?? true,
+            events,
           )
         ) {
           return;
@@ -544,6 +565,32 @@ export async function createPolymerServer(
       }
     }
   });
+
+  // Component 21: WebSocket upgrade routing. Only /api/events with a
+  // database upgrades; everything else (and db-less servers) fails
+  // the upgrade closed like every other surface.
+  if (db !== null) {
+    const upgradeDb: PolymerDatabase = db;
+    const handleUpgrade = attachUpgrade(wss, events, upgradeDb);
+    server.on("upgrade", (req, socket, head) => {
+      let pathname = "";
+      try {
+        pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+      } catch {
+        socket.destroy();
+        return;
+      }
+      if (pathname !== "/api/events") {
+        socket.destroy();
+        return;
+      }
+      handleUpgrade(req, socket, head);
+    });
+  } else {
+    server.on("upgrade", (_req, socket) => {
+      socket.destroy();
+    });
+  }
 
   return { server, db, closeSessions };
 }
