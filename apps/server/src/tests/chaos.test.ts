@@ -51,12 +51,11 @@ import {
  * 12. disabling a 1000+ subtree mid telemetry-flood → completes with
  *     every agent disabled and coordination pings unaffected
  *     (this file).
- * 13. parent disable mid-lease → liveness and spawning reject at
- *     the status gate (`unauthorized` heartbeat, `parent_disabled`
- *     spawn), the released lease is immediately claimable by an
- *     outsider; task mutations themselves are NOT status-gated (open
- *     design question, flagged — credentials deliberately survive
- *     disable so those two gates stay reachable) (this file).
+ * 13. parent disable mid-lease → heartbeat `unauthorized`, spawn
+ *     `parent_disabled`, every task/comment mutation `unauthorized`,
+ *     while the released lease stays immediately claimable by an
+ *     outsider (this file; status-gating closed the loop left open
+ *     at component 32).
  * 14. WebSocket drop mid-stream → resume-by-cursor replays exactly the
  *     missed events, then live (events tests).
  */
@@ -358,14 +357,10 @@ describe("failure/chaos (component 32)", () => {
           ((await res.json()) as Record<string, unknown>)["complete"],
         ).toBe(true);
 
-        // Enforcement lives at liveness and spawning — the surfaces
-        // that actually gate on agent status — while the released task
-        // stays claimable by an outsider (lease-governed, immediately).
-        // NOTE (open design question, not asserted either way): task
-        // mutations themselves do not check agent status, so a
-        // disabled agent holding a live credential can still write
-        // task rows its lease allows. Flagged for a follow-up; see the
-        // component-32 report.
+        // Enforcement lives at the status gate: heartbeat and spawn
+        // reject, and (since the follow-up slice) so does every
+        // task/comment mutation — while the released lease stays
+        // immediately claimable by an outsider (lease-governed).
         const childDenied = await withAuthedClients(
           app,
           [spawned.childToken],
@@ -378,13 +373,19 @@ describe("failure/chaos (component 32)", () => {
               name: "register_subagent",
               arguments: { name: "grandchild", role: "coder" },
             })) as unknown as { isError?: boolean };
-            return { beat, spawn };
+            const claim = (await client.callTool({
+              name: "claim_task",
+              arguments: { task_id: spawned.taskId },
+            })) as unknown as { isError?: boolean };
+            return { beat, spawn, claim };
           },
         );
         expect(childDenied.beat.isError).toBe(true);
         expect(JSON.stringify(childDenied.beat)).toContain("unauthorized");
         expect(childDenied.spawn.isError).toBe(true);
         expect(JSON.stringify(childDenied.spawn)).toContain("parent_disabled");
+        expect(childDenied.claim.isError).toBe(true);
+        expect(JSON.stringify(childDenied.claim)).toContain("unauthorized");
         const [outsider] = await registerAgentsOn(app, ["chaos-outsider"]);
         await withAuthedClients(app, [outsider.token], async ([client]) => {
           const claim = (await client.callTool({

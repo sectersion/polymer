@@ -1,7 +1,29 @@
 import { randomUUID } from "node:crypto";
 import { getAgentById } from "../identity/agents.js";
 import type { PolymerDatabase } from "../database/db.js";
-import { TaskAgentNotFoundError, TaskInvalidStatusError } from "./errors.js";
+import {
+  AgentDisabledError,
+  TaskAgentNotFoundError,
+  TaskInvalidStatusError,
+} from "./errors.js";
+
+/**
+ * Loose-end A: `disabled` is an explicit admin revocation of an
+ * agent's write agency, so every task/comment mutation rejects it
+ * with `unauthorized`. Reads stay open (they cannot mutate, and the
+ * disable path deliberately keeps sessions authenticating so the
+ * specific rejection codes stay reachable). `disconnected` is NOT
+ * gated — a slow-but-legitimate agent heartbeats back to life, and
+ * gating it would turn every network blip into a write outage.
+ * Unknown agents fall through to each mutation's own not-found
+ * error; this guard only fires on a known disabled row.
+ */
+export function requireActiveAgent(db: PolymerDatabase, agentId: string): void {
+  const agent = getAgentById(db, agentId);
+  if (agent !== undefined && agent.status === "disabled") {
+    throw new AgentDisabledError(agentId);
+  }
+}
 
 export const TASK_STATUSES = [
   "to_do",
@@ -81,6 +103,7 @@ export interface CreateTaskInput {
 export function createTask(db: PolymerDatabase, input: CreateTaskInput): Task {
   const title = input.title.trim();
   if (title === "") throw new Error("task title must not be empty");
+  requireActiveAgent(db, input.createdBy);
   if (getAgentById(db, input.createdBy) === undefined) {
     throw new TaskAgentNotFoundError(input.createdBy);
   }

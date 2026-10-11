@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import type { PolymerDatabase } from "../database/db.js";
 import { getAgentByName } from "../identity/agents.js";
 import { TaskNotFoundError } from "./errors.js";
-import { getTask, encodeCursor, decodeCursor } from "./store.js";
+import {
+  getTask,
+  encodeCursor,
+  decodeCursor,
+  requireActiveAgent,
+} from "./store.js";
 
 export const COMMENT_PAGE_DEFAULT = 50;
 export const COMMENT_PAGE_MAX = 500;
@@ -87,6 +92,9 @@ export function postComment(
   /** Component 19: human senders are administrators posting from REST. */
   senderType: "agent" | "human" = "agent",
 ): PostCommentResult {
+  // Human posts arrive on the administrator session, not an agent
+  // identity — only agent senders pass the disabled gate.
+  if (senderAgentId !== null) requireActiveAgent(db, senderAgentId);
   const post = db.transaction(() => {
     if (getTask(db, taskId) === undefined) {
       throw new TaskNotFoundError(taskId);
@@ -168,6 +176,7 @@ export function markPingRead(
   caller: string,
   mentionId: string,
 ): { success: true } {
+  requireActiveAgent(db, caller);
   const updated = db
     .prepare(
       "UPDATE mentions SET read = 1 WHERE mention_id = ? AND mentioned_agent_id = ?",
