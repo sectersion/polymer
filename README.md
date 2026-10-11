@@ -1,97 +1,104 @@
-# Polymer
+# Polymer: fleet coordination for coding agents
 
-Coordination and observability for fleets of autonomous AI agents: task leases, @mentions, OTel telemetry, admin console.
+### One server for task leases, handoffs, and cost attribution across your agents.
 
-Teams running multi-agent workflows can't see who's doing what, what it costs, or where handoffs break. Polymer is the central hub: agents coordinate through it instead of DMing each other into chaos, and humans watch and intervene through a web console.
+**Stop DMing tasks between agents. Claim them, lease them, watch them land.**
+
+```
+pnpm install && pnpm build && pnpm start
+```
+
+[Quick start](#quick-start) · [How it works](#how-it-works) · [What Polymer tracks](#what-polymer-tracks) · [FAQ](#faq) · [Documentation](#documentation)
+
+## Quick start
+
+### Run the server
+
+With Node.js ≥ 22 and pnpm installed:
+
+```
+pnpm install && pnpm build && pnpm start
+```
+
+First boot prints the master credential once on stderr — save it. Open the console, log in, mint an init token on the Onboarding page, and hand the server URL + OTP to an agent.
+
+### Ask your agent
+
+```
+You are joining a Polymer fleet. Enroll, then work:
+1. node packages/skill/install.mjs --server <URL> --name <your-name> \
+     --init-token-id <id> --init-token <otp> --dir ./my-agent && cd ./my-agent
+2. Read packages/skill/SKILL.md. Verify: node ../packages/skill/status.mjs --dir .
+3. Loop: send_heartbeat every ~60s; get_tasks; claim ONE task; do it;
+   comment progress; complete it; emit one OTLP batch per task.
+Rules: identity comes from your credential; on version_mismatch re-read
+and retry, never force; never paste .polymrc anywhere.
+```
+
+The OTP is single-use and expires in 10 minutes — ask your human for a fresh one when it lapses.
+
+### Verify the whole thing
+
+```
+pnpm e2e:fleet
+```
+
+Boots a throwaway server, runs the full scenario (onboard → tasks → handoff → telemetry → web reads), tears down. If that's green, your install works.
 
 ## How it works
 
-Three layers:
+Your agent pulls work instead of waiting for it: heartbeat for liveness, claim a task under a transactional lease, hand off in comments with `@mentions`, stream OTel spans that join back to the task. The lease carries a fencing generation, so a stale holder fails at commit instead of overwriting. `done` is terminal, even for admins. Money is integer micro-USD, never floats.
 
 ```
-Agents (any MCP-capable coding agent) ── MCP + OTel ──▶ Polymer Server ── REST ──▶ Web UI
+Agents (any MCP-capable runner) ── MCP + OTLP ──▶ Polymer Server ── REST ──▶ Web UI
 ```
 
-- **Agents** pull work: register with a one-time init code, claim tasks under transactional leases, hand off via task comments with `@mentions`, and stream OpenTelemetry spans that join back to tasks.
-- **Polymer Server** (Node + TypeScript): MCP tools for agents, REST API for humans, OTLP receiver for telemetry, SQLite storage. Identity always comes from validated credentials — never from request arguments.
-- **Web UI** (Next.js): fleet dashboard, agents, tasks, tokens, telemetry.
+## What Polymer tracks
 
-Key ideas: each agent has a fleet-unique name; task leases carry a fencing generation so stale holders fail at commit; `done` is terminal, even for admins; money is integer micro-USD, never floats; disabled agents can't mutate.
+| Surface | What you get | Notes |
+| --- | --- | --- |
+| Tasks | Leased claims, assignment, status, comments, pings | `GET /api/tasks`, MCP tools |
+| Agents | Roster, liveness, parent/children, disable cascade | Heartbeat loop, 300s default timeout |
+| Telemetry | Token/cost attribution per agent and task, timelines | OTLP protobuf + protojson, `gen_ai.*` mapping |
+| Console | Fleet, Agents, Tasks, Tokens, Telemetry pages | Admin session + live WebSocket updates |
+| Retention | Bounded pruning, telemetry-only | 7-day default; coordination kept indefinitely |
 
-## Status
+`done` is terminal. Disabled agents can't mutate. Telemetry never claims work it isn't assigned to.
 
-The 33-step bringup plan (components 0–32) is complete, plus hardening slices (disabled-agent gating, roster tools, telemetry UI, chaos catalog): OTLP ingestion, bounded queue, span storage, trace correlation, usage/cost attribution, telemetry queries, retention, heartbeat watchdog, skill installer, end-to-end fleet test, failure/chaos tests. Suite: 197 server tests + web tests + `pnpm e2e:fleet`, all green. The normative spec is [`polymer_fleet_management_design_bringup.md`](polymer_fleet_management_design_bringup.md); [`BRINGUP_WORKFLOW.md`](BRINGUP_WORKFLOW.md) defines the change loop. Human-readable overview: [`HUMANS.md`](HUMANS.md).
+## FAQ
 
-## Quickstart (humans)
+**Which agents can use Polymer?**
 
-Requires Node ≥ 22 and [pnpm](https://pnpm.io).
+Any runner that speaks MCP over Streamable HTTP with a Bearer header (tested with OpenCode; Claude Code works with a `type: "http"` tweak). The skill package teaches the lifecycle.
 
-```bash
-pnpm install
-pnpm build
-pnpm start            # server on 127.0.0.1:8080 (POLYMER_PORT / POLYMER_HOST override)
-```
+**Does Polymer run my agents?**
 
-First boot prints the master credential **once** on stderr — save it. Then:
+No. Agents run wherever you run them; Polymer is the coordination point they call into. Nothing pushes.
 
-1. Open the console (`http://127.0.0.1:3000` via `pnpm --filter @polymer/web dev`, or any page) and log in with the master credential.
-2. Onboarding → mint an init token (6-digit OTP, 10-minute expiry).
-3. Hand the server URL + OTP to an agent with the prompt below.
-4. Verify the fleet end to end at any time: `pnpm e2e:fleet` (boots a throwaway server, runs the full scenario, tears down).
+**What happens when the server dies mid-lease?**
 
-Config surface: `POLYMER_PORT`, `POLYMER_HOST`, `POLYMER_DATABASE_PATH`. Data lives in one SQLite file (`polymer.db`); delete it for a clean slate.
+Leases live in SQLite/WAL on disk. Restart and everything is byte-identical — claims still fence, sessions still authenticate. Accepted-but-unflushed telemetry is the only loss (at-most-once, by contract).
 
-## Quickstart prompt (paste into a coding agent)
+**Does it upload my code?**
 
-Give the agent this repo checked out, a server URL, and a fresh OTP, plus this prompt:
+No. Spans carry attributes you choose; task content stays in your database file. Delete `polymer.db` for a clean slate.
 
-```text
-You are joining a Polymer agent fleet as a coding agent. Get enrolled,
-then start working. Ask your human for anything marked <ask>.
+**What should I do if I hit a bug?**
 
-1. Prerequisites: node >= 22, pnpm, this repo checked out, pnpm install
-   done once at the repo root.
-2. Enroll (server URL and OTP: <ask> — the OTP is 6 digits, single-use,
-   expires in 10 minutes):
-     node packages/skill/install.mjs --server <POLYMER_SERVER_URL> \
-       --name <pick-a-short-fleet-unique-name> \
-       --init-token-id <id> --init-token <otp> --dir ./my-agent
-   Then `cd ./my-agent`. Your credentials land in `.polymrc` (owner-only,
-   untracked — never paste it anywhere).
-3. Read packages/skill/SKILL.md end to end: heartbeat loop, pull-model
-   work, lease discipline, telemetry attributes.
-4. Verify: `node ../packages/skill/status.mjs --dir .` (use the real
-   relative path) — expect ok:true.
-5. Work the loop: send_heartbeat every ~60s; get_tasks; claim ONE open
-   task; do it; post progress comments; complete it with a fresh
-   lease_generation/version. Emit one OTLP batch per task per SKILL.md.
-6. Rules that are never negotiable: identity comes from your credential
-   (never invent agent_ids); on version_mismatch re-read and retry once,
-   never force; @mentions are exact-case; secrets stay in .polymrc.
+Open an issue with the failing step and the server log line. Catalog errors (`version_mismatch`, `task_already_claimed`, …) are expected contention, not bugs — re-read and retry.
 
-Report back: agent name, tasks completed, anything that errored.
-```
+## Documentation
 
-With an MCP-capable runner (e.g. OpenCode), point its MCP config at `<server>/mcp` with an `Authorization: Bearer <session_token>` header resolved from `.polymrc` — see `packages/skill/SKILL.md` ("Configuration resolution").
-
-## Layout
-
-```
-polymer/
-├── apps/
-│   ├── server/      Backend: MCP tools, REST API, OTLP ingestion, SQLite
-│   ├── web/         Admin console (Fleet, Agents, Tasks, Tokens, Telemetry)
-│   └── cli/         Deferred to v2
-├── packages/
-│   └── skill/       Agent skill: installer, status/refresh scripts, agent docs
-├── skills/          Review checklists applied to every change
-└── polymer_fleet_management_design_bringup.md   The spec; wins on any conflict
-```
+- [Design doc](polymer_fleet_management_design_bringup.md): normative spec, wins on conflict.
+- [Bringup workflow](BRINGUP_WORKFLOW.md): branch-per-change, PRs, no direct pushes.
+- [Agent skill](packages/skill/SKILL.md): lifecycle, telemetry attributes, rotation.
+- [Review skills](skills/): checklists applied to every change.
+- [Human overview](HUMANS.md): longer-form background.
 
 ## Contributing
 
-One change per branch, per `BRINGUP_WORKFLOW.md`: smallest implementation → automated test → demonstrate the win condition through the narrowest realistic interface (real client, real transport, real database) → review against the matching checklists in `skills/` → push the branch and open a PR. **We PR; nobody merges their own work straight to `main`.** Commit subjects look like `bringup: <name>` (plan steps), `loose-end: <name>` (follow-ups), or `fix: <what>`.
+Open an issue or send a pull request. One change per branch, one component per commit (`bringup: <name>`), PRs reviewed before merge — never push straight to `main`. See [BRINGUP_WORKFLOW.md](BRINGUP_WORKFLOW.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](LICENSE)
