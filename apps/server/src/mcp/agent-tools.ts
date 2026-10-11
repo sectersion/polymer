@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { PolymerDatabase } from "../database/db.js";
 import type { EventBus } from "../http/events.js";
 import { registerAgent, registerSubagent } from "../identity/registration.js";
+import { getAgentById, listAgents } from "../identity/agents.js";
 import {
   HeartbeatUnauthorizedError,
   recordHeartbeat,
@@ -109,6 +110,73 @@ export function registerAgentTools(
       } catch (err) {
         registrationError(err);
       }
+    },
+  );
+  server.registerTool(
+    "get_agent_roster",
+    {
+      description:
+        "List fleet agents with liveness state (session auth only; any authenticated agent may read)",
+      inputSchema: {},
+    },
+    async (_args, extra) => {
+      if (db === null) {
+        throw new McpError(ErrorCode.InternalError, "database_error");
+      }
+      if (callerAgentId(extra) === undefined) {
+        throw new McpError(ErrorCode.InvalidRequest, "unauthorized");
+      }
+      const agents = listAgents(db).map((agent) => ({
+        agent_id: agent.agent_id,
+        name: agent.name,
+        role: agent.role,
+        status: agent.status,
+        last_seen: agent.last_seen,
+        parent_agent_id: agent.parent_agent_id,
+      }));
+      return toolResult({ agents });
+    },
+  );
+  server.registerTool(
+    "get_agent_info",
+    {
+      description:
+        "Detail for one agent, including task counts (session auth only; fleet-wide read)",
+      inputSchema: { agent_id: z.string().min(1) },
+    },
+    async (args, extra) => {
+      if (db === null) {
+        throw new McpError(ErrorCode.InternalError, "database_error");
+      }
+      if (callerAgentId(extra) === undefined) {
+        throw new McpError(ErrorCode.InvalidRequest, "unauthorized");
+      }
+      const agent = getAgentById(db, args.agent_id);
+      if (agent === undefined) {
+        throw new McpError(ErrorCode.InvalidRequest, "agent_not_found");
+      }
+      const tasksCreated = (
+        db
+          .prepare("SELECT COUNT(*) AS n FROM tasks WHERE created_by = ?")
+          .get(agent.agent_id) as { n: number }
+      ).n;
+      const tasksAssigned = (
+        db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM task_assignments WHERE agent_id = ?",
+          )
+          .get(agent.agent_id) as { n: number }
+      ).n;
+      return toolResult({
+        agent_id: agent.agent_id,
+        name: agent.name,
+        role: agent.role,
+        status: agent.status,
+        last_seen: agent.last_seen,
+        connected_at: agent.connected_at,
+        tasks_created: tasksCreated,
+        tasks_assigned: tasksAssigned,
+      });
     },
   );
   server.registerTool(

@@ -83,6 +83,12 @@ secrets in attributes.
 
 ## Rotation and recovery
 
+- Check connectivity anytime (read-only): `polymer-status [--dir .]`
+  prints the server, your agent id, and the roster size it can see.
+- Rotate from the enrolled directory: `polymer-refresh [--dir .]`
+  spends the reconnect secret, atomically rewrites `.polymrc`, and
+  verifies the fresh session before reporting success. The old
+  session stays valid; only the spent reconnect secret dies.
 - Refresh via `POST /api/tokens/refresh` with the reconnect secret
   (credential-in-header, no session). Persist-then-use: write the new
   credentials durably before discarding the old ones.
