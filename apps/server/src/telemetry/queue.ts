@@ -1,5 +1,11 @@
 import type { PolymerDatabase } from "../database/db.js";
 import type { ValidatedSpan } from "./otlp.js";
+import {
+  TASK_ID_REJECTED_COUNTER,
+  deriveSpanUsage,
+  resolveUsageTask,
+} from "./usage.js";
+import { randomUUID } from "node:crypto";
 
 /**
  * Component 23: the bounded in-memory telemetry queue.
@@ -120,6 +126,23 @@ export class TelemetryQueue {
         span: ValidatedSpan;
         receivedAt: string;
       }> = [];
+      // Component 26: usage rows derive in the SAME transaction as the
+      // spans — never a separate ingestion path. Only spans actually
+      // inserted (changes === 1) derive usage, so an OTLP retry of an
+      // already-flushed batch stays idempotent for costs too. Rejected
+      // task claims accumulate per chunk into one counter upsert.
+      const usageInsert = this.db.prepare(
+        `INSERT INTO usage_records
+           (usage_id, agent_id, task_id, trace_id, provider, model,
+            input_tokens, output_tokens, other_token_categories,
+            reported_cost_micro_usd, cost_source, recorded_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      const counterBump = this.db.prepare(
+        `INSERT INTO telemetry_counters (name, value) VALUES (?, ?)
+         ON CONFLICT(name) DO UPDATE SET value = value + excluded.value`,
+      );
+      let rejectedClaims = 0;
       const writeChunk = this.db.transaction(() => {
         for (const row of chunk) {
           const result = insert.run(
@@ -138,7 +161,32 @@ export class TelemetryQueue {
             JSON.stringify(row.span.scope),
             row.receivedAt,
           );
-          written += Number(result.changes);
+          if (Number(result.changes) !== 1) continue;
+          written += 1;
+          const usage = deriveSpanUsage(row.span);
+          if (!usage.hasUsage) continue;
+          const task = resolveUsageTask(this.db!, row.agentId, row.span);
+          if (task.rejected) rejectedClaims += 1;
+          usageInsert.run(
+            randomUUID(),
+            row.agentId,
+            task.taskId,
+            row.span.traceId,
+            usage.provider,
+            usage.model,
+            usage.inputTokens,
+            usage.outputTokens,
+            usage.otherTokenCategories === null
+              ? null
+              : JSON.stringify(usage.otherTokenCategories),
+            usage.reportedCostMicroUsd,
+            usage.costSource,
+            row.receivedAt,
+          );
+        }
+        if (rejectedClaims > 0) {
+          counterBump.run(TASK_ID_REJECTED_COUNTER, rejectedClaims);
+          rejectedClaims = 0;
         }
       });
       for (const batch of batches) {

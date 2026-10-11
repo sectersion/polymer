@@ -176,6 +176,33 @@ ALTER TABLE otel_spans DROP COLUMN end_time_unix_ns;
 ALTER TABLE otel_spans DROP COLUMN start_time_unix_ns;
 ALTER TABLE otel_spans DROP COLUMN parent_span_id;`,
   },
+  {
+    version: 9,
+    name: "009_usage_records",
+    up: `CREATE TABLE usage_records (
+  usage_id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  task_id TEXT NULL,
+  trace_id TEXT NULL,
+  provider TEXT NULL,
+  model TEXT NULL,
+  input_tokens INTEGER NULL,
+  output_tokens INTEGER NULL,
+  other_token_categories TEXT NULL,
+  reported_cost_micro_usd INTEGER NULL,
+  cost_source TEXT NOT NULL DEFAULT 'unknown'
+    CHECK(cost_source IN ('reported', 'unknown')),
+  recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_usage_task_time ON usage_records(task_id, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_usage_agent_time ON usage_records(agent_id, recorded_at);
+CREATE TABLE telemetry_counters (
+  name TEXT PRIMARY KEY,
+  value INTEGER NOT NULL DEFAULT 0 CHECK(value >= 0)
+);`,
+    down: `DROP TABLE IF EXISTS usage_records;
+DROP TABLE IF EXISTS telemetry_counters;`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

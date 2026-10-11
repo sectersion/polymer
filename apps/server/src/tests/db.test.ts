@@ -74,12 +74,12 @@ describe("SQLite connection and migrations (component 4)", () => {
     const path = tempDbPath();
     const first = openDatabase(path);
     openHandles.push(first);
-    expect(getAppliedVersions(first)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(getAppliedVersions(first)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     closeDatabase(openHandles.pop()!);
     const second = openDatabase(path);
     openHandles.push(second);
-    expect(getAppliedVersions(second)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
-    expect(getSchemaVersion(second)).toBe(8);
+    expect(getAppliedVersions(second)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(getSchemaVersion(second)).toBe(9);
     const applied = migrateUp(second);
     expect(applied).toEqual([]);
   });
@@ -87,6 +87,12 @@ describe("SQLite connection and migrations (component 4)", () => {
   it("rollback removes the latest migration; up re-applies", () => {
     const db = openDatabase(tempDbPath());
     openHandles.push(db);
+    expect(migrateDown(db)).toBe(9);
+    expect(getSchemaVersion(db)).toBe(8);
+    // Rollback drops usage + counters; span fidelity stays intact.
+    expect(tableExists(db, "usage_records")).toBe(false);
+    expect(tableExists(db, "telemetry_counters")).toBe(false);
+    expect(tableExists(db, "otel_spans")).toBe(true);
     expect(migrateDown(db)).toBe(8);
     expect(getSchemaVersion(db)).toBe(7);
     // Rollback restores the exact v7 shape: fidelity columns leave.
@@ -138,7 +144,7 @@ describe("SQLite connection and migrations (component 4)", () => {
     expect(getSchemaVersion(db)).toBe(0);
     expect(tableExists(db, "_migration_probe")).toBe(false);
     expect(migrateDown(db)).toBeNull();
-    expect(migrateUp(db)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(migrateUp(db)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(tableExists(db, "_migration_probe")).toBe(true);
     expect(tableExists(db, "agents")).toBe(true);
     expect(tableExists(db, "credentials")).toBe(true);
