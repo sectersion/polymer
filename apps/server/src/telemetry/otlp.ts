@@ -99,6 +99,16 @@ class Reader {
     }
   }
 
+  /**
+   * Signed int64 (OTLP `int64` is two's-complement): values at or past
+   * 2^63 wrap negative. Without this, a span carrying -5 decodes as
+   * 18446744073709551611 and the stored attributes lie.
+   */
+  int64(): bigint {
+    const unsigned = this.varint64();
+    return unsigned >= 1n << 63n ? unsigned - (1n << 64n) : unsigned;
+  }
+
   /** Little-endian fixed64 as BigInt (timestamps, doubles' bits). */
   fixed64(): bigint {
     if (8 > this.buf.length - this.pos) throw malformed();
@@ -180,7 +190,7 @@ function decodeAttributeValue(reader: Reader): OtelAttributeValue {
     }
     if (field === 3 && wire === 0) {
       // int64: exact as decimal string (protojson-compatible).
-      return { intValue: reader.varint64().toString() };
+      return { intValue: reader.int64().toString() };
     }
     if (field === 4 && wire === 1) {
       return { doubleValue: reader.fixedDouble() };
