@@ -107,6 +107,74 @@ export async function fetchTask(id: string): Promise<TaskDetail> {
   return backendGet<TaskDetail>(`/api/tasks/${id}`);
 }
 
+export interface TelemetrySummary {
+  total_comments: number;
+  total_tasks: number;
+  active_agents: number;
+  total_tokens_used: number;
+  total_cost_micro_usd: number;
+}
+
+export interface AgentTelemetryRow {
+  agent_id: string;
+  name: string;
+  comments_sent: number;
+  tasks_created: number;
+  tokens_used: number;
+  cost_micro_usd: number;
+}
+
+export interface TimelineEventRow {
+  usage_id: string;
+  agent_id: string;
+  task_id: string | null;
+  trace_id: string | null;
+  provider: string | null;
+  model: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  reported_cost_micro_usd: number | null;
+  cost_source: "reported" | "unknown";
+  recorded_at: string;
+}
+
+export interface CostBucket {
+  bucket_start: string;
+  cost_micro_usd: number;
+}
+
+/** Loose-end C: telemetry reads for the Fleet cards + Telemetry page. */
+export async function fetchSummary(): Promise<TelemetrySummary> {
+  return backendGet<TelemetrySummary>("/api/telemetry/summary");
+}
+
+export async function fetchAgentTelemetry(): Promise<AgentTelemetryRow[]> {
+  const body = await backendGet<{ agents: AgentTelemetryRow[] }>(
+    "/api/telemetry/agents",
+  );
+  return body.agents;
+}
+
+export async function fetchTimeline(limit = 20): Promise<TimelineEventRow[]> {
+  const body = await backendGet<{
+    events: TimelineEventRow[];
+    next_cursor: string | null;
+  }>(`/api/telemetry/timeline?limit=${limit}`);
+  return body.events;
+}
+
+export async function fetchDailyCosts(days = 7): Promise<CostBucket[]> {
+  const to = new Date();
+  const from = new Date(to.getTime() - days * 24 * 3600 * 1000);
+  const query =
+    `granularity=daily&from=${encodeURIComponent(from.toISOString())}` +
+    `&to=${encodeURIComponent(to.toISOString())}`;
+  const body = await backendGet<{ time_series: CostBucket[] }>(
+    `/api/telemetry/costs?${query}`,
+  );
+  return body.time_series;
+}
+
 export async function fetchTokens(): Promise<TokenRow[]> {
   const body = await backendGet<{ tokens: TokenRow[] }>("/api/tokens");
   return body.tokens;
