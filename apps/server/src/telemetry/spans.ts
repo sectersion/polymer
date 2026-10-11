@@ -3,8 +3,8 @@ import type { OtelAttribute } from "./otlp.js";
 
 /**
  * Component 24: stored-span reads. The writer (queue.ts) is the only
- * mutation path; these readers serve tests now and trace correlation
- * (25) plus telemetry queries (27) later. Rows round-trip exactly:
+ * mutation path; these readers serve trace correlation (25, see
+ * ./correlation.ts) plus telemetry queries (27) later. Rows round-trip exactly:
  * JSON columns parse back to the shapes the parser produced.
  */
 export interface StoredSpan {
