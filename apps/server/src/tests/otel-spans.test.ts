@@ -384,3 +384,50 @@ describe("OTel span storage (component 24)", () => {
     expect(fromJson.spans).toEqual(fromProto.spans);
   });
 });
+
+describe("protobuf signed integers (fix)", () => {
+  it("decodes negative int64 attributes as negative, not huge unsigned", () => {
+    // -5 as two's-complement varint: FB FF FF FF FF FF FF FF FF 01.
+    // vfield cannot encode this (arithmetic shift never terminates),
+    // so the bytes are laid down directly.
+    const negFive = new Uint8Array([
+      0xfb, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01,
+    ]);
+    const anyValue = concat(new Uint8Array([0x18]), negFive);
+    const kv = concat(field(1, utf8("delta")), field(2, anyValue));
+    const span = concat(
+      field(1, new Uint8Array(16).fill(0xcc)),
+      field(2, new Uint8Array(8).fill(0xdd)),
+      field(5, utf8("neg")),
+      field(9, kv),
+    );
+    const body = field(1, concat(field(2, concat(field(2, span)))));
+    const parsed = parseOtlpBatch("application/x-protobuf", body, 500);
+    expect(parsed.spans).toHaveLength(1);
+    expect(parsed.spans[0].attributes).toEqual([
+      { key: "delta", value: { intValue: "-5" } },
+    ]);
+    // The extremes round-trip exactly too.
+    const minBytes = (() => {
+      const out: number[] = [0x18];
+      for (let i = 0; i < 9; i += 1) out.push(0x80);
+      out.push(0x01);
+      return new Uint8Array(out);
+    })();
+    const minKv = concat(field(1, utf8("min")), field(2, minBytes));
+    const minSpan = concat(
+      field(1, new Uint8Array(16).fill(0xcc)),
+      field(2, new Uint8Array(8).fill(0xde)),
+      field(5, utf8("neg")),
+      field(9, minKv),
+    );
+    const minParsed = parseOtlpBatch(
+      "application/x-protobuf",
+      field(1, concat(field(2, concat(field(2, minSpan))))),
+      500,
+    );
+    expect(minParsed.spans[0].attributes).toEqual([
+      { key: "min", value: { intValue: String(-(1n << 63n)) } },
+    ]);
+  });
+});
