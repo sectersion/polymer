@@ -218,9 +218,11 @@ describe("Fleet page (component 20)", () => {
     expect(html).toContain("Agents");
     expect(html).toContain("Tasks");
     expect(html).toContain("Active");
-    // One agent, one task, one active (claimed) task.
-    const counts = [...html.matchAll(/tabular-nums">(\d+)</g)].map((m) => m[1]);
-    expect(counts).toEqual(["1", "1", "1"]);
+    // One agent, one task, one active (claimed) task; no telemetry yet.
+    const counts = [...html.matchAll(/tabular-nums">([\d,]+)</g)].map(
+      (m) => m[1],
+    );
+    expect(counts).toEqual(["1", "1", "1", "0", "0"]);
     // The live-region hook is wired: pushes and poll refreshes call
     // router.refresh(), so the next navigation shows fresh state.
     expect(html).toContain('data-testid="fleet-live"');
@@ -254,10 +256,10 @@ describe("Fleet page (component 20)", () => {
       });
       expect(res.status).toBe(200);
       const html = await res.text();
-      const counts = [...html.matchAll(/tabular-nums">(\d+)</g)].map(
+      const counts = [...html.matchAll(/tabular-nums">([\d,]+)</g)].map(
         (m) => m[1],
       );
-      expect(counts).toEqual(["1", "2", "1"]);
+      expect(counts).toEqual(["1", "2", "1", "0", "0"]);
     },
   );
 

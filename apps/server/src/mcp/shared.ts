@@ -10,6 +10,7 @@ import {
   TaskNotFoundError,
   TaskUnauthorizedError,
   TaskVersionMismatchError,
+  AgentDisabledError,
   PingNotFoundError,
 } from "../tasks/index.js";
 
@@ -51,7 +52,8 @@ export function taskToolError(err: unknown): never {
     err instanceof TaskAlreadyAssignedError ||
     err instanceof TaskNotAssignedError ||
     err instanceof PingNotFoundError ||
-    err instanceof TaskAgentNotFoundError
+    err instanceof TaskAgentNotFoundError ||
+    err instanceof AgentDisabledError
   ) {
     throw new McpError(ErrorCode.InvalidRequest, err.code);
   }

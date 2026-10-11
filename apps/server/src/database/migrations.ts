@@ -137,6 +137,72 @@ ALTER TABLE credentials ADD COLUMN csrf TEXT NULL;`,
     down: `DROP TABLE IF EXISTS audit_log;
 ALTER TABLE credentials DROP COLUMN csrf;`,
   },
+  {
+    version: 7,
+    name: "007_otel_spans",
+    up: `CREATE TABLE otel_spans (
+  span_id TEXT PRIMARY KEY,
+  trace_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL REFERENCES agents(agent_id),
+  name TEXT NOT NULL DEFAULT '',
+  ingested_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_otel_spans_trace ON otel_spans(trace_id);`,
+    down: `DROP TABLE IF EXISTS otel_spans;`,
+  },
+  {
+    version: 8,
+    name: "008_otel_span_fidelity",
+    up: `ALTER TABLE otel_spans ADD COLUMN parent_span_id TEXT NULL;
+ALTER TABLE otel_spans ADD COLUMN start_time_unix_ns TEXT NOT NULL DEFAULT '0000000000000000000';
+ALTER TABLE otel_spans ADD COLUMN end_time_unix_ns TEXT NOT NULL DEFAULT '0000000000000000000';
+ALTER TABLE otel_spans ADD COLUMN kind INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE otel_spans ADD COLUMN status_code INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE otel_spans ADD COLUMN status_message TEXT NULL;
+ALTER TABLE otel_spans ADD COLUMN attributes TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE otel_spans ADD COLUMN resource_attributes TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE otel_spans ADD COLUMN scope TEXT NOT NULL DEFAULT '{"name":"","version":""}';
+CREATE INDEX IF NOT EXISTS idx_otel_spans_agent_start ON otel_spans(agent_id, start_time_unix_ns);
+CREATE INDEX IF NOT EXISTS idx_otel_spans_start ON otel_spans(start_time_unix_ns);`,
+    down: `DROP INDEX IF EXISTS idx_otel_spans_agent_start;
+DROP INDEX IF EXISTS idx_otel_spans_start;
+ALTER TABLE otel_spans DROP COLUMN scope;
+ALTER TABLE otel_spans DROP COLUMN resource_attributes;
+ALTER TABLE otel_spans DROP COLUMN attributes;
+ALTER TABLE otel_spans DROP COLUMN status_message;
+ALTER TABLE otel_spans DROP COLUMN status_code;
+ALTER TABLE otel_spans DROP COLUMN kind;
+ALTER TABLE otel_spans DROP COLUMN end_time_unix_ns;
+ALTER TABLE otel_spans DROP COLUMN start_time_unix_ns;
+ALTER TABLE otel_spans DROP COLUMN parent_span_id;`,
+  },
+  {
+    version: 9,
+    name: "009_usage_records",
+    up: `CREATE TABLE usage_records (
+  usage_id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  task_id TEXT NULL,
+  trace_id TEXT NULL,
+  provider TEXT NULL,
+  model TEXT NULL,
+  input_tokens INTEGER NULL,
+  output_tokens INTEGER NULL,
+  other_token_categories TEXT NULL,
+  reported_cost_micro_usd INTEGER NULL,
+  cost_source TEXT NOT NULL DEFAULT 'unknown'
+    CHECK(cost_source IN ('reported', 'unknown')),
+  recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_usage_task_time ON usage_records(task_id, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_usage_agent_time ON usage_records(agent_id, recorded_at);
+CREATE TABLE telemetry_counters (
+  name TEXT PRIMARY KEY,
+  value INTEGER NOT NULL DEFAULT 0 CHECK(value >= 0)
+);`,
+    down: `DROP TABLE IF EXISTS usage_records;
+DROP TABLE IF EXISTS telemetry_counters;`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

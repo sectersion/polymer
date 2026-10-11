@@ -2,6 +2,14 @@
  * Task-domain error taxonomy: one class per catalog code so the MCP
  * layer maps them by catalog code in taskToolError.
  */
+export class AgentDisabledError extends Error {
+  readonly code = "unauthorized";
+  constructor(agentId: string) {
+    super(`disabled agent cannot mutate: ${agentId}`);
+    this.name = "AgentDisabledError";
+  }
+}
+
 export class TaskAgentNotFoundError extends Error {
   readonly code = "agent_not_found";
   constructor(agentId: string) {

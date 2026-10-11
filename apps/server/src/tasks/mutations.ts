@@ -5,6 +5,7 @@ import {
   TASK_LEASE_DEFAULT_SECONDS,
   getTask,
   listTaskAssignees,
+  requireActiveAgent,
   type Task,
   type TaskStatus,
 } from "./store.js";
@@ -43,6 +44,7 @@ export function assignTask(
   leaseGeneration: number,
   expectedVersion: number,
 ): AssignTaskResult {
+  requireActiveAgent(db, caller);
   if (agentIds.length === 0) {
     throw new Error("agent_ids must not be empty");
   }
@@ -117,6 +119,7 @@ export function transferCoordinator(
   expectedVersion: number,
   leaseDurationSeconds?: number,
 ): TransferCoordinatorResult {
+  requireActiveAgent(db, caller);
   const duration = leaseDurationSeconds ?? TASK_LEASE_DEFAULT_SECONDS;
   if (!Number.isInteger(duration) || duration <= 0) {
     throw new Error("lease_duration_seconds must be a positive integer");
@@ -190,6 +193,7 @@ export function requestUnassignment(
   caller: string,
   reason?: string,
 ): UnassignmentResult {
+  requireActiveAgent(db, caller);
   const task = getTask(db, taskId);
   if (task === undefined) {
     throw new TaskNotFoundError(taskId);
@@ -242,6 +246,7 @@ export function updateTaskStatus(
   leaseGeneration: number,
   expectedVersion: number,
 ): TaskStatusMutationResult {
+  requireActiveAgent(db, caller);
   const allowedTransitions: Partial<Record<TaskStatus, TaskStatus[]>> = {
     in_progress: ["done", "failed"],
     failed: ["to_do"],

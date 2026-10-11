@@ -97,6 +97,42 @@ export type ReadBodyResult =
   | { kind: "invalid" }
   | { kind: "too-large" };
 
+export type RawBodyResult =
+  { kind: "ok"; bytes: Uint8Array } | { kind: "too-large" };
+
+/**
+ * Byte-capable twin of readBody for binary payloads (OTLP protobuf):
+ * same cap semantics, no text decoding, no JSON attempt.
+ */
+export function readRawBody(
+  req: IncomingMessage,
+  maxBytes: number,
+): Promise<RawBodyResult> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let settled = false;
+    const finish = (result: RawBodyResult): void => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    req.on("data", (c: Buffer) => {
+      total += c.length;
+      if (total > maxBytes) {
+        finish({ kind: "too-large" });
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => {
+      if (settled) return;
+      finish({ kind: "ok", bytes: Buffer.concat(chunks) });
+    });
+    req.on("error", () => finish({ kind: "too-large" }));
+  });
+}
+
 export function readBody(
   req: IncomingMessage,
   maxBytes: number,

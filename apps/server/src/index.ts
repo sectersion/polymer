@@ -43,7 +43,14 @@ function main(): void {
       const { resolveDatabasePath, getSchemaVersion, closeDatabase } =
         await import("./database/db.js");
       const dbPath = resolveDatabasePath();
-      const { server, db, closeSessions } = await createPolymerServer({
+      const {
+        server,
+        db,
+        closeSessions,
+        closeTelemetry,
+        closeRetention,
+        closeWatchdog,
+      } = await createPolymerServer({
         databasePath: dbPath,
       });
       // Component 19: first-run master bootstrap — the plaintext is
@@ -76,6 +83,9 @@ function main(): void {
           .finally(() => {
             server.close(() => {
               try {
+                closeWatchdog();
+                closeRetention();
+                closeTelemetry();
                 if (db) closeDatabase(db);
               } finally {
                 process.exit(0);

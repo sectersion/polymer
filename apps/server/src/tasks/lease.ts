@@ -1,5 +1,10 @@
 import type { PolymerDatabase } from "../database/db.js";
-import { TASK_LEASE_DEFAULT_SECONDS, getTask, type Task } from "./store.js";
+import {
+  TASK_LEASE_DEFAULT_SECONDS,
+  getTask,
+  requireActiveAgent,
+  type Task,
+} from "./store.js";
 import {
   TaskAlreadyClaimedError,
   TaskInvalidStatusError,
@@ -37,6 +42,7 @@ export function claimTask(
   caller: string,
   leaseDurationSeconds: number = TASK_LEASE_DEFAULT_SECONDS,
 ): ClaimTaskResult {
+  requireActiveAgent(db, caller);
   if (!Number.isInteger(leaseDurationSeconds) || leaseDurationSeconds <= 0) {
     throw new Error("lease_duration_seconds must be a positive integer");
   }

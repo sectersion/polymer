@@ -55,6 +55,18 @@ Checklists: `skills/polymer-bringup-gate/SKILL.md` (always) + whichever of
 
 1. `git add` only the component's files. Working tree otherwise clean.
 2. Message: `bringup: <component-name>` + short body recording the
-   demonstrated win condition.
+   demonstrated win condition (`loose-end: <name>` for follow-ups,
+   `fix: <what>` for repairs).
 3. Never combine unproven components in one commit. A component is done
    only when its win condition was observed, not when it compiles.
+
+## Phase 6 — Branch & PR (no direct pushes)
+
+1. All work happens on a branch named `<kind>/<short-name>`
+   (`docs/…`, `fix/…`, `feat/…`, `loose-end/…`). `main` is only ever
+   moved by merging a PR.
+2. Push the branch and open a PR with `gh pr create`: summary of the
+   change, the win condition or test evidence, and any open questions.
+3. We PR; nobody merges straight to `main`. The author of a change
+   never merges their own PR — a second pair of eyes (human or review
+   agent) approves first.

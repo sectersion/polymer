@@ -13,7 +13,8 @@
     "lint": "turbo run lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "e2e:fleet": "pnpm --filter @polymer/server build && node apps/server/src/e2e/fleet.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

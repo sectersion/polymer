@@ -10,7 +10,15 @@ import { MCP_PATH, createMcpServer } from "../mcp/index.js";
 import { attachUpgrade, EventBus, REVALIDATE_INTERVAL_MS } from "./events.js";
 import { WebSocketServer } from "ws";
 import { createAdminLimiters, handleAdminRequest } from "./admin.js";
+import { DEFAULT_OTEL_OPTIONS, handleOtlpRequest } from "./otel.js";
+import { TelemetryQueue } from "../telemetry/queue.js";
+import {
+  DEFAULT_RETENTION_DAYS,
+  runTelemetryRetention,
+} from "../telemetry/retention.js";
+import { createLeaseNotifier, runLivenessSweep } from "../identity/watchdog.js";
 import { handleRestRequest } from "./rest.js";
+import { handleTelemetryRequest } from "./telemetry.js";
 import { extractBearerToken } from "../identity/auth.js";
 import {
   RefreshError,
@@ -37,6 +45,15 @@ export interface PolymerServer {
   /** End all live MCP sessions (used on shutdown so open SSE streams
    * do not hold `server.close()` open). */
   closeSessions: () => Promise<void>;
+  /** Stop the telemetry timer and flush what is queued. Runs before
+   * the database closes so a clean shutdown loses nothing buffered. */
+  closeTelemetry: () => void;
+  /** Stop the retention timer (component 28). */
+  closeRetention: () => void;
+  /** Stop the watchdog timers (component 29). */
+  closeWatchdog: () => void;
+  /** The fleet event bus (job emissions, live sockets). */
+  events: EventBus;
 }
 
 export interface PolymerServerOptions {
@@ -61,6 +78,30 @@ export interface PolymerServerOptions {
    * admin claim route answers 403. Full POLYMER.json wiring arrives
    * with its component; this option is the gate until then. */
   adminClaimEnabled?: boolean;
+  /** Component 22: OTLP base path (default "/otel"; full ingest path
+   * is `<base>/v1/traces`). Disabled entirely when `false`. */
+  telemetryEndpoint?: string;
+  telemetryEnabled?: boolean;
+  /** Component 22: raw byte cap per OTLP request (default 10 MiB). */
+  telemetryMaxRequestBytes?: number;
+  /** Component 22: max spans accepted per OTLP batch (default 500). */
+  telemetryBatchMaxSpans?: number;
+  /** Component 23: max batches held in memory (default 100). */
+  telemetryQueueMaxBatches?: number;
+  /** Component 23: flush interval in ms (default 1000). */
+  telemetryBatchFlushMs?: number;
+  /** Component 28: telemetry retention window in days (default 7).
+   * Coordination history is never pruned by this job. */
+  telemetryRetentionDays?: number;
+  /** Component 28: retention sweep interval in ms (default 1h).
+   * Pass 0 to disable the timer (manual runs still available). */
+  telemetryRetentionIntervalMs?: number;
+  /** Component 29: liveness sweep interval in ms (default 60s).
+   * Pass 0 to disable the timer (manual runs still available). */
+  livenessSweepIntervalMs?: number;
+  /** Component 29: lease-expiry notifier interval in ms (default 60s).
+   * Pass 0 to disable the timer (manual runs still available). */
+  leaseNotifierIntervalMs?: number;
   /** Component 21: session-revalidation tick in ms (default 60s). A
    * backstop for missed events and crash recovery only — revocation
    * closes sockets immediately, never via this timer. */
@@ -128,6 +169,14 @@ export async function createPolymerServer(
   // Admin budgets: login 5/min per IP + server-global 30/min, admin
   // ops 10/min per session — per-server instances, same as above.
   const adminLimiters = createAdminLimiters();
+  // Component 23: the bounded telemetry queue. One per server; the
+  // OTLP handler enqueues validated batches and the timer flushes
+  // them to SQLite. Unref'd so tests never hang on the handle.
+  const telemetryQueue = new TelemetryQueue(db, {
+    maxBatches: options.telemetryQueueMaxBatches ?? 100,
+    flushMs: options.telemetryBatchFlushMs ?? 1000,
+  });
+  telemetryQueue.start();
   // Component 21: the fleet event bus. One per server; passed to
   // every mutation surface (MCP tools + admin REST) so task, agent,
   // and comment changes publish to live admin sockets. Upgrade
@@ -300,7 +349,41 @@ export async function createPolymerServer(
         return;
       }
 
+      // Component 22: authenticated OTLP ingestion, kept completely
+      // separate from the coordination APIs (own path prefix, own
+      // auth, own limits). Checked before /api/ so the telemetry
+      // endpoint can never collide with a coordination route.
+      if (
+        await handleOtlpRequest(
+          req,
+          res,
+          url,
+          db,
+          {
+            endpoint:
+              options.telemetryEndpoint ?? DEFAULT_OTEL_OPTIONS.endpoint,
+            enabled: options.telemetryEnabled ?? DEFAULT_OTEL_OPTIONS.enabled,
+            maxRequestBytes:
+              options.telemetryMaxRequestBytes ??
+              DEFAULT_OTEL_OPTIONS.maxRequestBytes,
+            batchMaxSpans:
+              options.telemetryBatchMaxSpans ??
+              DEFAULT_OTEL_OPTIONS.batchMaxSpans,
+          },
+          (batch) => telemetryQueue.enqueue(batch),
+        )
+      ) {
+        return;
+      }
+
       if (url.pathname.startsWith("/api/")) {
+        // Component 27 owns GET /api/telemetry/* (admin session
+        // reads over actual stored telemetry). It answers only its
+        // own paths; unknown telemetry paths 404 here, never fall
+        // through to the coordination reads.
+        if (handleTelemetryRequest(req, res, url, db)) {
+          return;
+        }
         // Component 19 owns the admin auth + mutation surface; it
         // answers only its own paths, leaving everything else to the
         // component-18 read routes (and their 405/404 layers).
@@ -543,7 +626,117 @@ export async function createPolymerServer(
     });
   }
 
-  return { server, db, closeSessions };
+  const closeTelemetry = (): void => {
+    telemetryQueue.stop();
+    try {
+      telemetryQueue.flush();
+    } catch (err) {
+      // Best effort on the way out; the process is exiting anyway.
+      console.error("telemetry final flush failed:", err);
+    }
+  };
+
+  // Component 28: the incremental retention job. One timer per
+  // server; each run is bounded (≤500 rows/table/txn, capped
+  // iterations) so a deep backlog cannot monopolize the writer.
+  // Unref'd so tests never hang on the handle. A failed run logs
+  // counts-only context and retries on the next tick — retention
+  // must never take down the server or wedge the timer.
+  const retentionDays =
+    options.telemetryRetentionDays ?? DEFAULT_RETENTION_DAYS;
+  const retentionIntervalMs = options.telemetryRetentionIntervalMs ?? 3600_000;
+  let retentionTimer: ReturnType<typeof setInterval> | undefined;
+  if (db !== null && retentionIntervalMs > 0) {
+    retentionTimer = setInterval(() => {
+      try {
+        const result = runTelemetryRetention(db, { retentionDays });
+        if (result.spansDeleted > 0 || result.usageDeleted > 0) {
+          console.log(
+            JSON.stringify({
+              event: "telemetry_retention",
+              spansDeleted: result.spansDeleted,
+              usageDeleted: result.usageDeleted,
+              iterations: result.iterations,
+              truncated: result.truncated,
+              at: new Date().toISOString(),
+            }),
+          );
+        }
+      } catch (err) {
+        console.error("telemetry retention failed:", err);
+      }
+    }, retentionIntervalMs);
+    retentionTimer.unref?.();
+  }
+  const closeRetention = (): void => {
+    if (retentionTimer !== undefined) {
+      clearInterval(retentionTimer);
+      retentionTimer = undefined;
+    }
+  };
+
+  // Component 29: the two watchdog jobs, strictly separated. Job 1
+  // flips stale agents to `disconnected` (liveness only — ownership
+  // columns are never in its UPDATE). Job 2 only emits
+  // `task.lease_expired` events and writes nothing. Both timers are
+  // unref'd; either failing logs and retries next tick.
+  const livenessIntervalMs = options.livenessSweepIntervalMs ?? 60_000;
+  const notifierIntervalMs = options.leaseNotifierIntervalMs ?? 60_000;
+  const notifier = createLeaseNotifier(events);
+  let livenessTimer: ReturnType<typeof setInterval> | undefined;
+  let notifierTimer: ReturnType<typeof setInterval> | undefined;
+  if (db !== null && livenessIntervalMs > 0) {
+    const sweepDb: PolymerDatabase = db;
+    livenessTimer = setInterval(() => {
+      try {
+        const result = runLivenessSweep(sweepDb, events);
+        if (result.marked.length > 0) {
+          console.log(
+            JSON.stringify({
+              event: "liveness_sweep",
+              marked: result.marked,
+              truncated: result.truncated,
+              at: new Date().toISOString(),
+            }),
+          );
+        }
+      } catch (err) {
+        console.error("liveness sweep failed:", err);
+      }
+    }, livenessIntervalMs);
+    livenessTimer.unref?.();
+  }
+  if (db !== null && notifierIntervalMs > 0) {
+    const notifyDb: PolymerDatabase = db;
+    notifierTimer = setInterval(() => {
+      try {
+        notifier.check(notifyDb);
+      } catch (err) {
+        console.error("lease notifier failed:", err);
+      }
+    }, notifierIntervalMs);
+    notifierTimer.unref?.();
+  }
+  const closeWatchdog = (): void => {
+    if (livenessTimer !== undefined) {
+      clearInterval(livenessTimer);
+      livenessTimer = undefined;
+    }
+    if (notifierTimer !== undefined) {
+      clearInterval(notifierTimer);
+      notifierTimer = undefined;
+    }
+  };
+
+  return {
+    server,
+    db,
+    closeSessions,
+    closeTelemetry,
+    closeRetention,
+    closeWatchdog,
+    events,
+  };
 }
 
 function isInitializeCall(body: unknown): boolean {
@@ -578,6 +771,8 @@ function isBootstrapCall(body: unknown): boolean {
 export interface ListeningServer extends PolymerServer {
   url: string;
   close: () => Promise<void>;
+  /** The fleet event bus (tests observe job emissions via replay). */
+  events: EventBus;
 }
 
 export async function listen(
@@ -585,7 +780,15 @@ export async function listen(
   port = 0,
   options: PolymerServerOptions = {},
 ): Promise<ListeningServer> {
-  const { server, db, closeSessions } = await createPolymerServer({
+  const {
+    server,
+    db,
+    closeSessions,
+    closeTelemetry,
+    closeRetention,
+    closeWatchdog,
+    events,
+  } = await createPolymerServer({
     ...options,
     listenHost: host,
   });
@@ -597,9 +800,18 @@ export async function listen(
     server,
     db: db as ListeningServer["db"],
     closeSessions,
+    closeTelemetry,
+    closeRetention,
+    closeWatchdog,
+    events,
     url: `http://${host}:${actualPort}`,
     close: async () => {
       await closeSessions();
+      closeWatchdog();
+      closeRetention();
+      // Drain telemetry before the database closes: a clean shutdown
+      // commits what a crash would lose (component 23's contract).
+      closeTelemetry();
       await new Promise<void>((resolve, reject) =>
         server.close((err) => {
           if (db) {
