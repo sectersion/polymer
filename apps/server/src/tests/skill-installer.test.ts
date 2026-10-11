@@ -15,7 +15,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const INSTALLER = resolve(HERE, "../../../../packages/skill/install.mjs");
 
 function freshOtp(app: {
-  db: NonNullable<Awaited<ReturnType<typeof listen>>["db"]>;
+  db: import("../database/db.js").PolymerDatabase | null;
 }): { id: string; secret: string } {
   const { credential, secret } = mintCredential(app.db!, { type: "init" });
   return { id: credential.credential_id, secret };
