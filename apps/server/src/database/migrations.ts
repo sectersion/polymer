@@ -150,6 +150,32 @@ ALTER TABLE credentials DROP COLUMN csrf;`,
 CREATE INDEX IF NOT EXISTS idx_otel_spans_trace ON otel_spans(trace_id);`,
     down: `DROP TABLE IF EXISTS otel_spans;`,
   },
+  {
+    version: 8,
+    name: "008_otel_span_fidelity",
+    up: `ALTER TABLE otel_spans ADD COLUMN parent_span_id TEXT NULL;
+ALTER TABLE otel_spans ADD COLUMN start_time_unix_ns TEXT NOT NULL DEFAULT '0000000000000000000';
+ALTER TABLE otel_spans ADD COLUMN end_time_unix_ns TEXT NOT NULL DEFAULT '0000000000000000000';
+ALTER TABLE otel_spans ADD COLUMN kind INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE otel_spans ADD COLUMN status_code INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE otel_spans ADD COLUMN status_message TEXT NULL;
+ALTER TABLE otel_spans ADD COLUMN attributes TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE otel_spans ADD COLUMN resource_attributes TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE otel_spans ADD COLUMN scope TEXT NOT NULL DEFAULT '{"name":"","version":""}';
+CREATE INDEX IF NOT EXISTS idx_otel_spans_agent_start ON otel_spans(agent_id, start_time_unix_ns);
+CREATE INDEX IF NOT EXISTS idx_otel_spans_start ON otel_spans(start_time_unix_ns);`,
+    down: `DROP INDEX IF EXISTS idx_otel_spans_agent_start;
+DROP INDEX IF EXISTS idx_otel_spans_start;
+ALTER TABLE otel_spans DROP COLUMN scope;
+ALTER TABLE otel_spans DROP COLUMN resource_attributes;
+ALTER TABLE otel_spans DROP COLUMN attributes;
+ALTER TABLE otel_spans DROP COLUMN status_message;
+ALTER TABLE otel_spans DROP COLUMN status_code;
+ALTER TABLE otel_spans DROP COLUMN kind;
+ALTER TABLE otel_spans DROP COLUMN end_time_unix_ns;
+ALTER TABLE otel_spans DROP COLUMN start_time_unix_ns;
+ALTER TABLE otel_spans DROP COLUMN parent_span_id;`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

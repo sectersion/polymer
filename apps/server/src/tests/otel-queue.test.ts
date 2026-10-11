@@ -21,7 +21,20 @@ const SERVER_DIST = join(
 );
 
 function span(traceId: string, spanId: string, name = "s"): ValidatedSpan {
-  return { traceId, spanId, name };
+  return {
+    traceId,
+    spanId,
+    parentSpanId: null,
+    name,
+    kind: 0,
+    startTimeUnixNano: "0",
+    endTimeUnixNano: "0",
+    statusCode: 0,
+    statusMessage: null,
+    attributes: [],
+    resourceAttributes: [],
+    scope: { name: "", version: "" },
+  };
 }
 
 const T = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";

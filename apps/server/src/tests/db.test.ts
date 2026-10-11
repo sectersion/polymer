@@ -74,12 +74,12 @@ describe("SQLite connection and migrations (component 4)", () => {
     const path = tempDbPath();
     const first = openDatabase(path);
     openHandles.push(first);
-    expect(getAppliedVersions(first)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(getAppliedVersions(first)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     closeDatabase(openHandles.pop()!);
     const second = openDatabase(path);
     openHandles.push(second);
-    expect(getAppliedVersions(second)).toEqual([1, 2, 3, 4, 5, 6, 7]);
-    expect(getSchemaVersion(second)).toBe(7);
+    expect(getAppliedVersions(second)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(getSchemaVersion(second)).toBe(8);
     const applied = migrateUp(second);
     expect(applied).toEqual([]);
   });
@@ -87,10 +87,22 @@ describe("SQLite connection and migrations (component 4)", () => {
   it("rollback removes the latest migration; up re-applies", () => {
     const db = openDatabase(tempDbPath());
     openHandles.push(db);
-    expect(migrateDown(db)).toBe(7);
-    expect(getSchemaVersion(db)).toBe(6);
-    expect(tableExists(db, "otel_spans")).toBe(false);
+    expect(migrateDown(db)).toBe(8);
+    expect(getSchemaVersion(db)).toBe(7);
+    // Rollback restores the exact v7 shape: fidelity columns leave.
+    const spanColumns = db
+      .prepare("PRAGMA table_info(otel_spans)")
+      .all() as Array<{ name: string }>;
+    expect(spanColumns.map((c) => c.name)).toEqual([
+      "span_id",
+      "trace_id",
+      "agent_id",
+      "name",
+      "ingested_at",
+    ]);
+    expect(tableExists(db, "otel_spans")).toBe(true);
     expect(tableExists(db, "audit_log")).toBe(true);
+    expect(migrateDown(db)).toBe(7);
     expect(migrateDown(db)).toBe(6);
     expect(getSchemaVersion(db)).toBe(5);
     expect(tableExists(db, "audit_log")).toBe(false);
@@ -126,7 +138,7 @@ describe("SQLite connection and migrations (component 4)", () => {
     expect(getSchemaVersion(db)).toBe(0);
     expect(tableExists(db, "_migration_probe")).toBe(false);
     expect(migrateDown(db)).toBeNull();
-    expect(migrateUp(db)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(migrateUp(db)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(tableExists(db, "_migration_probe")).toBe(true);
     expect(tableExists(db, "agents")).toBe(true);
     expect(tableExists(db, "credentials")).toBe(true);

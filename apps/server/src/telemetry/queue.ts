@@ -108,8 +108,11 @@ export class TelemetryQueue {
       const batches = this.pending.splice(0, this.pending.length);
       const insert = this.db.prepare(
         `INSERT OR IGNORE INTO otel_spans
-           (span_id, trace_id, agent_id, name, ingested_at)
-         VALUES (?, ?, ?, ?, ?)`,
+           (span_id, trace_id, agent_id, name, parent_span_id,
+            start_time_unix_ns, end_time_unix_ns, kind, status_code,
+            status_message, attributes, resource_attributes, scope,
+            ingested_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       let written = 0;
       let chunk: Array<{
@@ -124,6 +127,15 @@ export class TelemetryQueue {
             row.span.traceId,
             row.agentId,
             row.span.name,
+            row.span.parentSpanId,
+            row.span.startTimeUnixNano,
+            row.span.endTimeUnixNano,
+            row.span.kind,
+            row.span.statusCode,
+            row.span.statusMessage,
+            JSON.stringify(row.span.attributes),
+            JSON.stringify(row.span.resourceAttributes),
+            JSON.stringify(row.span.scope),
             row.receivedAt,
           );
           written += Number(result.changes);

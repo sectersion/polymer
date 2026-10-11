@@ -356,7 +356,16 @@ describe("OTLP receiver (component 22)", () => {
       {
         traceId: "01010101010101010101010101010101",
         spanId: "0202020202020202",
+        parentSpanId: null,
         name: "x",
+        kind: 0,
+        startTimeUnixNano: "0",
+        endTimeUnixNano: "0",
+        statusCode: 0,
+        statusMessage: null,
+        attributes: [],
+        resourceAttributes: [],
+        scope: { name: "", version: "" },
       },
     ]);
 
