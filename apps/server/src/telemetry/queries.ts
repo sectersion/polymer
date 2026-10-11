@@ -138,30 +138,51 @@ export interface TimelineEvent {
 }
 
 /**
- * Opaque timeline cursor: the last row's (recorded_at, rowid).
- * Rowid-only cursors would misorder backdated inserts; this keeps
- * pages exactly chronological. Tampering answers `invalid_cursor`.
+ * Opaque timeline cursor: the last row's (recorded_at, rowid) plus the
+ * exact filter it was issued under. A cursor replayed against a
+ * different from/to/agent answers `invalid_cursor` instead of
+ * silently skipping or repeating rows mid-walk.
  */
-function encodeTimelineCursor(recordedAt: string, rowid: number): string {
+interface TimelineCursor {
+  recordedAt: string;
+  rowid: number;
+  from: string;
+  to: string;
+  agentId: string | null;
+}
+
+function encodeTimelineCursor(cursor: TimelineCursor): string {
   return Buffer.from(
-    JSON.stringify({ t: recordedAt, r: rowid }),
+    JSON.stringify({
+      t: cursor.recordedAt,
+      r: cursor.rowid,
+      f: cursor.from,
+      o: cursor.to,
+      a: cursor.agentId,
+    }),
     "utf8",
   ).toString("base64url");
 }
 
-function decodeTimelineCursor(cursor: string): {
+function decodeTimelineCursor(
+  cursor: string,
+  input: { from: string; to: string; agentId?: string },
+): {
   recordedAt: string;
   rowid: number;
 } {
   try {
     const raw = JSON.parse(
       Buffer.from(cursor, "base64url").toString("utf8"),
-    ) as { t?: unknown; r?: unknown };
+    ) as { t?: unknown; r?: unknown; f?: unknown; o?: unknown; a?: unknown };
     if (
       typeof raw.t !== "string" ||
       typeof raw.r !== "number" ||
       !Number.isInteger(raw.r) ||
-      raw.r < 0
+      raw.r < 0 ||
+      raw.f !== input.from ||
+      raw.o !== input.to ||
+      (raw.a ?? null) !== (input.agentId ?? null)
     ) {
       fail("invalid_cursor");
     }
@@ -193,7 +214,11 @@ export function listTimeline(
   const params: unknown[] = [range.from, range.to];
   let cursorSql = "";
   if (input.cursor !== undefined) {
-    const cursor = decodeTimelineCursor(input.cursor);
+    const cursor = decodeTimelineCursor(input.cursor, {
+      from: range.from,
+      to: range.to,
+      agentId: input.agentId,
+    });
     cursorSql = "AND (recorded_at > ? OR (recorded_at = ? AND rowid > ?))";
     params.push(cursor.recordedAt, cursor.recordedAt, cursor.rowid);
   }
@@ -222,10 +247,13 @@ export function listTimeline(
     events: page.map(toTimelineEvent),
     next_cursor:
       hasMore && page.length > 0
-        ? encodeTimelineCursor(
-            page[page.length - 1]["recorded_at"] as string,
-            page[page.length - 1]._rowid,
-          )
+        ? encodeTimelineCursor({
+            recordedAt: page[page.length - 1]["recorded_at"] as string,
+            rowid: page[page.length - 1]._rowid,
+            from: range.from,
+            to: range.to,
+            agentId: input.agentId ?? null,
+          })
         : null,
   };
 }
