@@ -377,6 +377,17 @@ describe("telemetry queries (component 27)", () => {
       expect(page2.next_cursor).toBeNull();
       expect([...page1.events, ...page2.events]).toEqual(full.events);
 
+      // A cursor replayed under a different filter is rejected instead
+      // of silently skipping or repeating rows mid-walk.
+      for (const shifted of [
+        `/api/telemetry/timeline?from=2026-01-01T00:00:00.000Z&to=2026-01-31T00:00:00.000Z&limit=2&cursor=${encodeURIComponent(page1.next_cursor!)}&agent_id=${b.agentId}`,
+        `/api/telemetry/timeline?from=2026-01-02T00:00:00.000Z&to=2026-01-31T00:00:00.000Z&limit=2&cursor=${encodeURIComponent(page1.next_cursor!)}`,
+      ]) {
+        const res = await get(app.url, shifted, cookie);
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ error: "invalid_cursor" });
+      }
+
       // Bad ranges and cursors are 400, never 500.
       for (const bad of [
         "/api/telemetry/timeline?from=nope",
