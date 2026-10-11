@@ -16,6 +16,7 @@ import {
   DEFAULT_RETENTION_DAYS,
   runTelemetryRetention,
 } from "../telemetry/retention.js";
+import { createLeaseNotifier, runLivenessSweep } from "../identity/watchdog.js";
 import { handleRestRequest } from "./rest.js";
 import { handleTelemetryRequest } from "./telemetry.js";
 import { extractBearerToken } from "../identity/auth.js";
@@ -49,6 +50,10 @@ export interface PolymerServer {
   closeTelemetry: () => void;
   /** Stop the retention timer (component 28). */
   closeRetention: () => void;
+  /** Stop the watchdog timers (component 29). */
+  closeWatchdog: () => void;
+  /** The fleet event bus (job emissions, live sockets). */
+  events: EventBus;
 }
 
 export interface PolymerServerOptions {
@@ -91,6 +96,12 @@ export interface PolymerServerOptions {
   /** Component 28: retention sweep interval in ms (default 1h).
    * Pass 0 to disable the timer (manual runs still available). */
   telemetryRetentionIntervalMs?: number;
+  /** Component 29: liveness sweep interval in ms (default 60s).
+   * Pass 0 to disable the timer (manual runs still available). */
+  livenessSweepIntervalMs?: number;
+  /** Component 29: lease-expiry notifier interval in ms (default 60s).
+   * Pass 0 to disable the timer (manual runs still available). */
+  leaseNotifierIntervalMs?: number;
   /** Component 21: session-revalidation tick in ms (default 60s). A
    * backstop for missed events and crash recovery only — revocation
    * closes sockets immediately, never via this timer. */
@@ -664,7 +675,68 @@ export async function createPolymerServer(
     }
   };
 
-  return { server, db, closeSessions, closeTelemetry, closeRetention };
+  // Component 29: the two watchdog jobs, strictly separated. Job 1
+  // flips stale agents to `disconnected` (liveness only — ownership
+  // columns are never in its UPDATE). Job 2 only emits
+  // `task.lease_expired` events and writes nothing. Both timers are
+  // unref'd; either failing logs and retries next tick.
+  const livenessIntervalMs = options.livenessSweepIntervalMs ?? 60_000;
+  const notifierIntervalMs = options.leaseNotifierIntervalMs ?? 60_000;
+  const notifier = createLeaseNotifier(events);
+  let livenessTimer: ReturnType<typeof setInterval> | undefined;
+  let notifierTimer: ReturnType<typeof setInterval> | undefined;
+  if (db !== null && livenessIntervalMs > 0) {
+    const sweepDb: PolymerDatabase = db;
+    livenessTimer = setInterval(() => {
+      try {
+        const result = runLivenessSweep(sweepDb, events);
+        if (result.marked.length > 0) {
+          console.log(
+            JSON.stringify({
+              event: "liveness_sweep",
+              marked: result.marked,
+              truncated: result.truncated,
+              at: new Date().toISOString(),
+            }),
+          );
+        }
+      } catch (err) {
+        console.error("liveness sweep failed:", err);
+      }
+    }, livenessIntervalMs);
+    livenessTimer.unref?.();
+  }
+  if (db !== null && notifierIntervalMs > 0) {
+    const notifyDb: PolymerDatabase = db;
+    notifierTimer = setInterval(() => {
+      try {
+        notifier.check(notifyDb);
+      } catch (err) {
+        console.error("lease notifier failed:", err);
+      }
+    }, notifierIntervalMs);
+    notifierTimer.unref?.();
+  }
+  const closeWatchdog = (): void => {
+    if (livenessTimer !== undefined) {
+      clearInterval(livenessTimer);
+      livenessTimer = undefined;
+    }
+    if (notifierTimer !== undefined) {
+      clearInterval(notifierTimer);
+      notifierTimer = undefined;
+    }
+  };
+
+  return {
+    server,
+    db,
+    closeSessions,
+    closeTelemetry,
+    closeRetention,
+    closeWatchdog,
+    events,
+  };
 }
 
 function isInitializeCall(body: unknown): boolean {
@@ -699,6 +771,8 @@ function isBootstrapCall(body: unknown): boolean {
 export interface ListeningServer extends PolymerServer {
   url: string;
   close: () => Promise<void>;
+  /** The fleet event bus (tests observe job emissions via replay). */
+  events: EventBus;
 }
 
 export async function listen(
@@ -706,11 +780,18 @@ export async function listen(
   port = 0,
   options: PolymerServerOptions = {},
 ): Promise<ListeningServer> {
-  const { server, db, closeSessions, closeTelemetry, closeRetention } =
-    await createPolymerServer({
-      ...options,
-      listenHost: host,
-    });
+  const {
+    server,
+    db,
+    closeSessions,
+    closeTelemetry,
+    closeRetention,
+    closeWatchdog,
+    events,
+  } = await createPolymerServer({
+    ...options,
+    listenHost: host,
+  });
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
   const address = server.address();
   const actualPort =
@@ -721,9 +802,12 @@ export async function listen(
     closeSessions,
     closeTelemetry,
     closeRetention,
+    closeWatchdog,
+    events,
     url: `http://${host}:${actualPort}`,
     close: async () => {
       await closeSessions();
+      closeWatchdog();
       closeRetention();
       // Drain telemetry before the database closes: a clean shutdown
       // commits what a crash would lose (component 23's contract).

@@ -5,6 +5,11 @@ import type { PolymerDatabase } from "../database/db.js";
 import type { EventBus } from "../http/events.js";
 import { registerAgent, registerSubagent } from "../identity/registration.js";
 import {
+  HeartbeatUnauthorizedError,
+  recordHeartbeat,
+} from "../identity/watchdog.js";
+import { AgentNotFoundError } from "../identity/agents.js";
+import {
   callerAgentId,
   heartbeatSchema,
   registrationError,
@@ -103,6 +108,34 @@ export function registerAgentTools(
         return toolResult({ ...out });
       } catch (err) {
         registrationError(err);
+      }
+    },
+  );
+  server.registerTool(
+    "send_heartbeat",
+    {
+      description:
+        "Heartbeat: refresh agent liveness (last_seen now; idle, or working while coordinating a live lease; disabled agents are rejected)",
+      inputSchema: {},
+    },
+    async (_args, extra) => {
+      if (db === null) {
+        throw new McpError(ErrorCode.InternalError, "database_error");
+      }
+      const caller = callerAgentId(extra);
+      if (caller === undefined) {
+        throw new McpError(ErrorCode.InvalidRequest, "unauthorized");
+      }
+      try {
+        return toolResult(recordHeartbeat(db, caller));
+      } catch (err) {
+        if (err instanceof HeartbeatUnauthorizedError) {
+          throw new McpError(ErrorCode.InvalidRequest, "unauthorized");
+        }
+        if (err instanceof AgentNotFoundError) {
+          throw new McpError(ErrorCode.InvalidRequest, "agent_not_found");
+        }
+        throw err;
       }
     },
   );
