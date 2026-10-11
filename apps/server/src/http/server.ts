@@ -13,6 +13,7 @@ import { createAdminLimiters, handleAdminRequest } from "./admin.js";
 import { DEFAULT_OTEL_OPTIONS, handleOtlpRequest } from "./otel.js";
 import { TelemetryQueue } from "../telemetry/queue.js";
 import { handleRestRequest } from "./rest.js";
+import { handleTelemetryRequest } from "./telemetry.js";
 import { extractBearerToken } from "../identity/auth.js";
 import {
   RefreshError,
@@ -353,6 +354,13 @@ export async function createPolymerServer(
       }
 
       if (url.pathname.startsWith("/api/")) {
+        // Component 27 owns GET /api/telemetry/* (admin session
+        // reads over actual stored telemetry). It answers only its
+        // own paths; unknown telemetry paths 404 here, never fall
+        // through to the coordination reads.
+        if (handleTelemetryRequest(req, res, url, db)) {
+          return;
+        }
         // Component 19 owns the admin auth + mutation surface; it
         // answers only its own paths, leaving everything else to the
         // component-18 read routes (and their 405/404 layers).
