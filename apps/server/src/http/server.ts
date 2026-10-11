@@ -12,6 +12,10 @@ import { WebSocketServer } from "ws";
 import { createAdminLimiters, handleAdminRequest } from "./admin.js";
 import { DEFAULT_OTEL_OPTIONS, handleOtlpRequest } from "./otel.js";
 import { TelemetryQueue } from "../telemetry/queue.js";
+import {
+  DEFAULT_RETENTION_DAYS,
+  runTelemetryRetention,
+} from "../telemetry/retention.js";
 import { handleRestRequest } from "./rest.js";
 import { handleTelemetryRequest } from "./telemetry.js";
 import { extractBearerToken } from "../identity/auth.js";
@@ -43,6 +47,8 @@ export interface PolymerServer {
   /** Stop the telemetry timer and flush what is queued. Runs before
    * the database closes so a clean shutdown loses nothing buffered. */
   closeTelemetry: () => void;
+  /** Stop the retention timer (component 28). */
+  closeRetention: () => void;
 }
 
 export interface PolymerServerOptions {
@@ -79,6 +85,12 @@ export interface PolymerServerOptions {
   telemetryQueueMaxBatches?: number;
   /** Component 23: flush interval in ms (default 1000). */
   telemetryBatchFlushMs?: number;
+  /** Component 28: telemetry retention window in days (default 7).
+   * Coordination history is never pruned by this job. */
+  telemetryRetentionDays?: number;
+  /** Component 28: retention sweep interval in ms (default 1h).
+   * Pass 0 to disable the timer (manual runs still available). */
+  telemetryRetentionIntervalMs?: number;
   /** Component 21: session-revalidation tick in ms (default 60s). A
    * backstop for missed events and crash recovery only — revocation
    * closes sockets immediately, never via this timer. */
@@ -613,7 +625,46 @@ export async function createPolymerServer(
     }
   };
 
-  return { server, db, closeSessions, closeTelemetry };
+  // Component 28: the incremental retention job. One timer per
+  // server; each run is bounded (≤500 rows/table/txn, capped
+  // iterations) so a deep backlog cannot monopolize the writer.
+  // Unref'd so tests never hang on the handle. A failed run logs
+  // counts-only context and retries on the next tick — retention
+  // must never take down the server or wedge the timer.
+  const retentionDays =
+    options.telemetryRetentionDays ?? DEFAULT_RETENTION_DAYS;
+  const retentionIntervalMs = options.telemetryRetentionIntervalMs ?? 3600_000;
+  let retentionTimer: ReturnType<typeof setInterval> | undefined;
+  if (db !== null && retentionIntervalMs > 0) {
+    retentionTimer = setInterval(() => {
+      try {
+        const result = runTelemetryRetention(db, { retentionDays });
+        if (result.spansDeleted > 0 || result.usageDeleted > 0) {
+          console.log(
+            JSON.stringify({
+              event: "telemetry_retention",
+              spansDeleted: result.spansDeleted,
+              usageDeleted: result.usageDeleted,
+              iterations: result.iterations,
+              truncated: result.truncated,
+              at: new Date().toISOString(),
+            }),
+          );
+        }
+      } catch (err) {
+        console.error("telemetry retention failed:", err);
+      }
+    }, retentionIntervalMs);
+    retentionTimer.unref?.();
+  }
+  const closeRetention = (): void => {
+    if (retentionTimer !== undefined) {
+      clearInterval(retentionTimer);
+      retentionTimer = undefined;
+    }
+  };
+
+  return { server, db, closeSessions, closeTelemetry, closeRetention };
 }
 
 function isInitializeCall(body: unknown): boolean {
@@ -655,7 +706,7 @@ export async function listen(
   port = 0,
   options: PolymerServerOptions = {},
 ): Promise<ListeningServer> {
-  const { server, db, closeSessions, closeTelemetry } =
+  const { server, db, closeSessions, closeTelemetry, closeRetention } =
     await createPolymerServer({
       ...options,
       listenHost: host,
@@ -669,9 +720,11 @@ export async function listen(
     db: db as ListeningServer["db"],
     closeSessions,
     closeTelemetry,
+    closeRetention,
     url: `http://${host}:${actualPort}`,
     close: async () => {
       await closeSessions();
+      closeRetention();
       // Drain telemetry before the database closes: a clean shutdown
       // commits what a crash would lose (component 23's contract).
       closeTelemetry();

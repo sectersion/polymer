@@ -43,7 +43,7 @@ function main(): void {
       const { resolveDatabasePath, getSchemaVersion, closeDatabase } =
         await import("./database/db.js");
       const dbPath = resolveDatabasePath();
-      const { server, db, closeSessions, closeTelemetry } =
+      const { server, db, closeSessions, closeTelemetry, closeRetention } =
         await createPolymerServer({
           databasePath: dbPath,
         });
@@ -77,6 +77,7 @@ function main(): void {
           .finally(() => {
             server.close(() => {
               try {
+                closeRetention();
                 closeTelemetry();
                 if (db) closeDatabase(db);
               } finally {
