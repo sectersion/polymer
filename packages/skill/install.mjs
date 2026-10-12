@@ -33,10 +33,12 @@ function usage() {
   return [
     "usage: polymer-install --server URL --name AGENT [--role ROLE]",
     "                      --init-token-id ID --init-token OTP --dir DIR",
-    "                      [--mcp-path /mcp]",
+    "                      [--mcp-path /mcp] [--client opencode|claude]",
     "",
     "Enroll an agent on a Polymer server. OTP arguments are required",
     "only when no working credentials exist yet for --server/--name.",
+    "--client picks the .mcp.json transport type (opencode wants",
+    '"remote", Claude Code wants "http").',
   ].join("\n");
 }
 
@@ -126,11 +128,14 @@ async function enroll(server, mcpPath, { initTokenId, initToken, name, role }) {
   return content;
 }
 
-function writeMcpJson(dir, server) {
+function writeMcpJson(dir, server, client) {
   const template = readFileSync(join(HERE, "mcp.json.template"), "utf8");
   writeFileSync(
     join(dir, ".mcp.json"),
-    `${template.replaceAll("${POLYMER_SERVER}", server).trim()}\n`,
+    `${template
+      .replaceAll("${POLYMER_SERVER}", server)
+      .replaceAll("${MCP_TYPE}", client === "claude" ? "http" : "remote")
+      .trim()}\n`,
   );
 }
 
@@ -156,6 +161,13 @@ async function main() {
   const role = args.role ?? "coder";
   const dir = resolve(args.dir ?? ".");
   const mcpPath = args["mcp-path"] ?? "/mcp";
+  const client = args.client ?? "opencode";
+  if (client !== "opencode" && client !== "claude") {
+    fail(
+      2,
+      `--client must be opencode or claude, got ${JSON.stringify(client)}`,
+    );
+  }
   if (!server || !name) fail(2, `missing required flags\n${usage()}`);
   if (!/^https?:\/\//.test(server)) {
     fail(2, `--server must be an http(s) URL, got ${JSON.stringify(server)}`);
@@ -172,7 +184,7 @@ async function main() {
     typeof stored?.session_token === "string" &&
     (await pingOk(server, mcpPath, stored.session_token))
   ) {
-    writeMcpJson(dir, server);
+    writeMcpJson(dir, server, client);
     const gitignoreTouched = ensureGitignore(dir);
     console.log(
       JSON.stringify({
@@ -217,7 +229,7 @@ async function main() {
   };
   writeFileSync(rcPath, `${JSON.stringify(rc, null, 2)}\n`, { mode: 0o600 });
   chmodSync(rcPath, 0o600);
-  writeMcpJson(dir, server);
+  writeMcpJson(dir, server, client);
   const gitignoreTouched = ensureGitignore(dir);
   // Identifiers only on stdout — secrets stay in `.polymrc`.
   console.log(

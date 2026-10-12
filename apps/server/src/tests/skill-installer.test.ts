@@ -108,6 +108,11 @@ describe("skill installer (component 30)", () => {
         readFileSync(join(dir, ".mcp.json"), "utf8"),
       ) as Record<string, unknown>;
       expect(JSON.stringify(mcp)).toContain(app.url);
+      expect(
+        (mcp["mcpServers"] as Record<string, Record<string, unknown>>)[
+          "polymer"
+        ]?.["type"],
+      ).toBe("remote");
       expect(JSON.stringify(mcp)).not.toContain(rc["session_token"] as string);
       expect(JSON.stringify(mcp)).not.toContain(
         rc["reconnect_secret"] as string,
@@ -159,6 +164,46 @@ describe("skill installer (component 30)", () => {
       const usage = await install(app, tempRepo(), ["--name", "only-name"]);
       expect(usage.status).toBe(2);
       expect(usage.stderr).toContain("usage:");
+    } finally {
+      await app.close();
+    }
+  }, 60000);
+
+  it("--client claude emits Claude's transport type; bogus clients fail usage", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-skill-"),
+    });
+    try {
+      const { credential, secret } = mintCredential(app.db!, { type: "init" });
+      const dir = tempRepo();
+      const claude = await install(app, dir, [
+        "--name",
+        "claude-agent",
+        "--init-token-id",
+        credential.credential_id,
+        "--init-token",
+        secret,
+        "--client",
+        "claude",
+      ]);
+      expect(claude.status).toBe(0);
+      const mcp = JSON.parse(
+        readFileSync(join(dir, ".mcp.json"), "utf8"),
+      ) as Record<string, unknown>;
+      expect(
+        (mcp["mcpServers"] as Record<string, Record<string, unknown>>)[
+          "polymer"
+        ]?.["type"],
+      ).toBe("http");
+
+      const bogus = await install(app, tempRepo(), [
+        "--name",
+        "x",
+        "--client",
+        "cursor",
+      ]);
+      expect(bogus.status).toBe(2);
+      expect(bogus.stderr).toContain("--client must be opencode or claude");
     } finally {
       await app.close();
     }
