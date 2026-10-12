@@ -174,29 +174,25 @@ describe("Telemetry page (loose-end C)", () => {
     });
     expect(otlp.status).toBe(200);
 
-    const build = spawn("node", ["node_modules/next/dist/bin/next", "build"], {
-      cwd: WEB_DIR,
-      env: { ...process.env },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    await new Promise<void>((resolve, reject) => {
-      let out = "";
-      const timer = setTimeout(
-        () => reject(new Error(`next build timed out: ${out.slice(-500)}`)),
-        300000,
-      );
-      build.on("exit", (code) => {
-        clearTimeout(timer);
-        if (code === 0) resolve();
-        else reject(new Error(`next build exited ${code}: ${out.slice(-500)}`));
-      });
-      build.stderr?.on("data", (chunk: Buffer) => {
-        out += chunk.toString();
-      });
-      build.stdout?.on("data", (chunk: Buffer) => {
-        out += chunk.toString();
-      });
-    });
+    // 200 means enqueued, not committed: wait for the flush to land
+    // the usage row before asserting on the rendered page. (The old
+    // per-file builds accidentally provided this settling time.)
+    const deadline = Date.now() + 15000;
+    for (;;) {
+      const summary = (await (
+        await fetch(`${BACKEND_URL}/api/telemetry/summary`, {
+          headers: { cookie: adminCookie },
+        })
+      ).json()) as Record<string, number>;
+      if (summary["total_tokens_used"] === 150) break;
+      if (Date.now() > deadline) {
+        throw new Error("telemetry never flushed before page fetch");
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    // Boot the shared production build (built once per run by
+    // tests/setup-build.ts) against this backend.
     web = spawn(
       "node",
       [

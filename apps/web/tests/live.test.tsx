@@ -144,30 +144,8 @@ describe("useEvents hook (component 21)", () => {
     }
     vi.stubGlobal("WebSocket", CookieWebSocket);
 
-    // Boot the production web build (for the /api/auth/csrf route).
-    const build = spawn("node", ["node_modules/next/dist/bin/next", "build"], {
-      cwd: WEB_DIR,
-      env: { ...process.env },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    await new Promise<void>((resolve, reject) => {
-      let out = "";
-      const timer = setTimeout(
-        () => reject(new Error(`next build timed out: ${out.slice(-500)}`)),
-        300000,
-      );
-      build.on("exit", (code) => {
-        clearTimeout(timer);
-        if (code === 0) resolve();
-        else reject(new Error(`next build exited ${code}: ${out.slice(-500)}`));
-      });
-      build.stderr?.on("data", (c: Buffer) => {
-        out += c.toString();
-      });
-      build.stdout?.on("data", (c: Buffer) => {
-        out += c.toString();
-      });
-    });
+    // Boot the shared production build (built once per run by
+    // tests/setup-build.ts) for the /api/auth/csrf route.
     web = spawn(
       "node",
       ["node_modules/next/dist/bin/next", "start", "-p", String(webPort)],
