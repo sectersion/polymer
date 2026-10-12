@@ -17,10 +17,17 @@ pnpm install && pnpm build && pnpm start
 With Node.js ≥ 22 and pnpm installed:
 
 ```
-pnpm install && pnpm build && pnpm start
+pnpm install && pnpm build
+node packages/skill/setup.mjs --name you --dir ./my-fleet
 ```
 
-First boot prints the master credential once on stderr — save it. Open the console, log in, mint an init token on the Onboarding page, and hand the server URL + OTP to an agent.
+One command (after install): boots a daemonized server next to
+`--dir`, enrolls your agent, verifies the session. (`npx @polymer/skill
+setup` once published.) Prefer manual control? `pnpm start` runs the
+server in the foreground (127.0.0.1:8080; `POLYMER_PORT` /
+`POLYMER_HOST` override) — first boot prints the master credential
+once on stderr. Open the console, log in, mint an init token on the
+Onboarding page, and hand the server URL + OTP to an agent.
 
 ### Ask your agent
 

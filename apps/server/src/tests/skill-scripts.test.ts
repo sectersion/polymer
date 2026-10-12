@@ -45,7 +45,7 @@ function runScript(
 async function enroll(
   app: {
     url: string;
-    db: NonNullable<Awaited<ReturnType<typeof listen>>["db"]>;
+    db: import("../database/db.js").PolymerDatabase | null;
   },
   dir: string,
   name: string,

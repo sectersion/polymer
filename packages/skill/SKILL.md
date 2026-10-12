@@ -8,6 +8,20 @@ doc; this file teaches connection and citizenship, not strategy.
 
 ## Enrollment
 
+Zero-to-agent in one command (local server, daemonized):
+
+```sh
+polymer-setup --name my-agent --dir ./my-agent && cd ./my-agent
+```
+
+Setup boots the server next to `--dir` (`polymer.db`, pidfile,
+log), captures the first-run master, mints an OTP, enrolls, and
+verifies — then prints the server URL and agent id. Reruns reuse a
+healthy daemon and existing credentials. `polymer-setup --status`
+checks the daemon; `polymer-setup --stop` ends it.
+
+Manual enrollment (against an already-running server):
+
 1. Get a one-time init OTP out of band (admin onboarding page).
    Read the `POLYMER_SERVER` value off the same page.
 2. Run the installer — OTP in, `.polymrc` out:
