@@ -7,19 +7,21 @@
   "bin": {
     "polymer-install": "./install.mjs",
     "polymer-status": "./status.mjs",
-    "polymer-refresh": "./refresh.mjs"
+    "polymer-refresh": "./refresh.mjs",
+    "polymer-setup": "./setup.mjs"
   },
   "files": [
     "install.mjs",
     "status.mjs",
     "refresh.mjs",
+    "setup.mjs",
     "config.mjs",
     "SKILL.md",
     "mcp.json.template"
   ],
   "scripts": {
     "build": "echo \"@polymer/skill: static files, nothing to build\"",
-    "test": "node --check install.mjs && node --check status.mjs && node --check refresh.mjs && node --check config.mjs",
+    "test": "node --check install.mjs && node --check status.mjs && node --check refresh.mjs && node --check setup.mjs && node --check config.mjs",
     "lint": "eslint .",
     "typecheck": "echo \"@polymer/skill: plain JavaScript, nothing to typecheck\""
   },
