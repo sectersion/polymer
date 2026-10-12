@@ -1,0 +1,44 @@
+# Self-host Polymer: `docker compose up --build -d`.
+#
+# Exposes web on :3000, server on :8080 (loopback only by default;
+# publish them or put a reverse proxy in front). Behind a proxy such
+# as Caddy, route to the SERVER: /mcp*, /otel*, /health, and
+# /api/events (WebSocket upgrade!); everything else goes to WEB.
+# The web app reaches the server as POLYMER_API_URL (server-side),
+# so keep that pointing at the compose service name.
+#
+# First boot prints the master credential once in `docker logs
+# polymer-server-1` — save it, log into the console, mint OTPs.
+name: polymer
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    image: ghcr.io/sectersion/polymer-server:latest
+    environment:
+      POLYMER_HOST: "0.0.0.0"
+      POLYMER_PORT: "8080"
+      POLYMER_DATABASE_PATH: /data/polymer.db
+    volumes:
+      - polymer-data:/data
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: ghcr.io/sectersion/polymer-web:latest
+    environment:
+      POLYMER_API_URL: http://server:8080
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - server
+    restart: unless-stopped
+
+volumes:
+  polymer-data:
