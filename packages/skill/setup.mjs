@@ -28,7 +28,6 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import net from "node:net";
@@ -231,7 +230,9 @@ async function main() {
     if (existsSync(paths.pid)) {
       try {
         unlinkSync(paths.pid);
-      } catch {}
+      } catch {
+        // Stale pidfile from a dead daemon; the boot below replaces it.
+      }
     }
     const entry = findServerEntry(argOf(argv, "--server-entry"));
     if (!entry) {
@@ -260,7 +261,9 @@ async function main() {
     daemon.unref();
     try {
       closeSync(logFd);
-    } catch {}
+    } catch {
+      // The daemon inherited the fd; our copy is best-effort.
+    }
     if (!(await waitHealthy(url))) {
       fail(1, `server never became healthy at ${url} (see ${paths.log})`);
     }
