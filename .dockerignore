@@ -1,0 +1,11 @@
+node_modules
+.next
+dist
+.turbo
+coverage
+.git
+tmp
+*.db
+*.db-wal
+*.db-shm
+*.db-journal

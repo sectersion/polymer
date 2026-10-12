@@ -155,32 +155,8 @@ describe("Fleet page (component 20)", () => {
       await client.close();
     }
 
-    // Boot the production web build against this backend. The
-    // build runs here (not just `next start` on a stale .next) so the
-    // test is hermetic: what it fetches is current sources.
-    const build = spawn("node", ["node_modules/next/dist/bin/next", "build"], {
-      cwd: WEB_DIR,
-      env: { ...process.env },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    await new Promise<void>((resolve, reject) => {
-      let out = "";
-      const timer = setTimeout(
-        () => reject(new Error(`next build timed out: ${out.slice(-500)}`)),
-        300000,
-      );
-      build.on("exit", (code) => {
-        clearTimeout(timer);
-        if (code === 0) resolve();
-        else reject(new Error(`next build exited ${code}: ${out.slice(-500)}`));
-      });
-      build.stderr?.on("data", (chunk: Buffer) => {
-        out += chunk.toString();
-      });
-      build.stdout?.on("data", (chunk: Buffer) => {
-        out += chunk.toString();
-      });
-    });
+    // Boot the shared production build (built once per run by
+    // tests/setup-build.ts) against this backend.
     web = spawn(
       "node",
       [
