@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "polymer": {
-      "type": "streamable-http",
+      "type": "${MCP_TYPE}",
       "url": "${POLYMER_SERVER}/mcp"
     }
   }
