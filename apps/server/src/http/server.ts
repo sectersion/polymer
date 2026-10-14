@@ -29,6 +29,7 @@ import {
   InitVerifyLimiter,
   McpLimiter,
   RefreshLimiter,
+  resolveRateLimitIp,
 } from "../identity/rate-limit.js";
 import {
   closeDatabase,
@@ -106,6 +107,10 @@ export interface PolymerServerOptions {
    * backstop for missed events and crash recovery only — revocation
    * closes sockets immediately, never via this timer. */
   eventsRevalidateMs?: number;
+  /** Explicit CIDR/IP list of trusted proxies. When set, rate-limit
+   * IP keys resolve to the rightmost X-Forwarded-For entry outside
+   * these ranges; otherwise the socket address is used. */
+  trustedProxies?: string[];
 }
 
 interface McpSession {
@@ -169,6 +174,13 @@ export async function createPolymerServer(
   // Admin budgets: login 5/min per IP + server-global 30/min, admin
   // ops 10/min per session — per-server instances, same as above.
   const adminLimiters = createAdminLimiters();
+  const trustedProxies = options.trustedProxies ?? [];
+  const clientIpFor = (req: IncomingMessage): string =>
+    resolveRateLimitIp(
+      req.socket.remoteAddress ?? "unknown",
+      req.headers["x-forwarded-for"],
+      trustedProxies,
+    );
   // Component 23: the bounded telemetry queue. One per server; the
   // OTLP handler enqueues validated batches and the timer flushes
   // them to SQLite. Unref'd so tests never hang on the handle.
@@ -330,7 +342,7 @@ export async function createPolymerServer(
                   event: "reconnect_already_used",
                   credential_id: err.credentialId,
                   agent_id: err.agentId,
-                  ip: req.socket.remoteAddress ?? "unknown",
+                  ip: clientIpFor(req),
                   at: new Date().toISOString(),
                 }),
               );
@@ -398,6 +410,7 @@ export async function createPolymerServer(
             adminLimiters,
             options.adminClaimEnabled ?? true,
             events,
+            trustedProxies,
           )
         ) {
           return;
@@ -482,7 +495,7 @@ export async function createPolymerServer(
             return;
           }
           if (isRegisterAgentCall(message)) {
-            const ip = req.socket.remoteAddress ?? "unknown";
+            const ip = clientIpFor(req);
             if (!initVerifyLimiter.consume(ip)) {
               jsonResponse(res, 429, {
                 error: "rate_limit_exceeded",
@@ -500,7 +513,7 @@ export async function createPolymerServer(
         // spamming keep-alives is rate-limited, never free. Session-
         // bound notifications from unauthenticated bootstrap clients
         // therefore no longer count as "free" traffic.
-        const clientIp = req.socket.remoteAddress ?? "unknown";
+        const clientIp = clientIpFor(req);
         const limitKey =
           agentId !== undefined ? `agent:${agentId}` : `ip:${clientIp}`;
         if (!mcpLimiter.consume(limitKey)) {
@@ -613,7 +626,7 @@ export async function createPolymerServer(
         socket.destroy();
         return;
       }
-      const ip = req.socket.remoteAddress ?? "unknown";
+      const ip = clientIpFor(req);
       if (!adminLimiters.login.consume(ip)) {
         socket.destroy();
         return;
