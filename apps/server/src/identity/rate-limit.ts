@@ -71,9 +71,11 @@ export class InitVerifyLimiter extends FixedWindowLimiter {
 /**
  * Component 9: reconnect refresh budget — 5 req/min per credential
  * plus a server-global cap of 60/min. The per-key slot is keyed by the
- * credential's public-id prefix (not by IP).
+ * credential's public-id prefix (not by IP). Extends FixedWindowLimiter
+ * directly so changes to the OTP-verify budget never silently move the
+ * refresh budget.
  */
-export class RefreshLimiter extends InitVerifyLimiter {
+export class RefreshLimiter extends FixedWindowLimiter {
   constructor(windowMs = 60_000, now: () => number = Date.now) {
     super(5, 60, windowMs, now);
   }
@@ -117,4 +119,72 @@ export class AdminOpsLimiter extends FixedWindowLimiter {
   constructor(windowMs = 60_000, now: () => number = Date.now) {
     super(10, Number.POSITIVE_INFINITY, windowMs, now);
   }
+}
+
+/** True when an IPv4 address falls inside a CIDR range. */
+function ipv4InCidr(ip: string, cidr: string): boolean {
+  const slash = cidr.indexOf("/");
+  if (slash === -1) return ip === cidr;
+  const base = cidr.slice(0, slash);
+  const bits = Number(cidr.slice(slash + 1));
+  if (!Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+  const toInt = (s: string): number | null => {
+    const parts = s.split(".");
+    if (parts.length !== 4) return null;
+    let n = 0;
+    for (const p of parts) {
+      if (!/^\d+$/.test(p)) return null;
+      const v = Number(p);
+      if (v < 0 || v > 255) return null;
+      n = (n << 8) | v;
+    }
+    return n >>> 0;
+  };
+  const ipInt = toInt(ip);
+  const baseInt = toInt(base);
+  if (ipInt === null || baseInt === null) return false;
+  if (bits === 0) return true;
+  const mask = bits === 32 ? 0xffffffff : (~0 << (32 - bits)) >>> 0;
+  return (ipInt & mask) === (baseInt & mask);
+}
+
+function isTrustedAddress(ip: string, trusted: string[]): boolean {
+  const norm = ip.trim().toLowerCase();
+  for (const entry of trusted) {
+    const t = entry.trim().toLowerCase();
+    if (t === norm) return true;
+    if (t.includes("/") && ipv4InCidr(norm, t)) return true;
+  }
+  return false;
+}
+
+/**
+ * Resolve the rate-limit key IP for a request.
+ *
+ * Default: the socket remote address. When `trustedProxies` (explicit
+ * CIDR/IP list) is configured, walk `X-Forwarded-For` right-to-left
+ * and return the rightmost entry outside the trusted ranges. The
+ * leftmost entry is never trusted (spoofable). Falls back to the
+ * socket address when no usable entry exists.
+ */
+export function resolveRateLimitIp(
+  socketIp: string | undefined,
+  forwardedFor: string | string[] | undefined,
+  trustedProxies: string[] = [],
+): string {
+  const fallback = socketIp ?? "unknown";
+  if (trustedProxies.length === 0 || forwardedFor === undefined) return fallback;
+  const raw = Array.isArray(forwardedFor) ? forwardedFor.join(",") : forwardedFor;
+  const chain = raw
+    .split(",")
+    .map((s) => s.trim().replace(/^\[|\]$/g, ""))
+    .filter((s) => s.length > 0);
+  if (chain.length === 0) return fallback;
+  // The socket peer must itself be trusted before XFF is consulted.
+  if (!isTrustedAddress(fallback, trustedProxies)) return fallback;
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const entry = chain[i]!;
+    if (!isTrustedAddress(entry, trustedProxies)) return entry;
+  }
+  return fallback;
 }

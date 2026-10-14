@@ -23,7 +23,7 @@ import {
 } from "../identity/credentials.js";
 import { listAudit } from "../identity/audit.js";
 import { disableAgentSubtree } from "../identity/disable.js";
-import { AdminOpsLimiter, LoginLimiter } from "../identity/rate-limit.js";
+import { AdminOpsLimiter, LoginLimiter, resolveRateLimitIp } from "../identity/rate-limit.js";
 import type { EventBus } from "./events.js";
 import {
   TASK_STATUSES,
@@ -113,13 +113,20 @@ function cookieSetCookieHeader(
   token: string,
   maxAgeSeconds: number,
   host: string,
+  forwardedProto?: string | string[],
 ): string {
   // __Host- prefix requires Secure + Path=/ + no Domain; Secure is
-  // required whenever the listener is not loopback.
+  // required whenever the listener is not loopback or the request
+  // arrived via a TLS-terminating proxy (X-Forwarded-Proto=https).
+  const proto = Array.isArray(forwardedProto)
+    ? forwardedProto[0]?.split(",")[0]?.trim().toLowerCase()
+    : forwardedProto?.split(",")[0]?.trim().toLowerCase();
   const secure =
     host !== "127.0.0.1" && host !== "localhost" && host !== "::1"
       ? "; Secure"
-      : "";
+      : proto === "https"
+        ? "; Secure"
+        : "";
   return `__Host-polymer_admin=${token}; HttpOnly; SameSite=Lax; Path=/${secure}; Max-Age=${maxAgeSeconds}`;
 }
 
@@ -177,13 +184,18 @@ export function handleAdminRequest(
   limiters: AdminLimiters,
   adminClaimEnabled: boolean,
   events: EventBus,
+  trustedProxies: string[] = [],
 ): boolean {
   const { pathname } = url;
   if (!isAdminPath(pathname, req.method ?? "")) return false;
 
   try {
     const { login, ops } = limiters;
-    const ip = req.socket.remoteAddress ?? "unknown";
+    const ip = resolveRateLimitIp(
+      req.socket.remoteAddress ?? "unknown",
+      req.headers["x-forwarded-for"],
+      trustedProxies,
+    );
 
     // --- auth ---
     if (pathname === "/api/auth/login" && req.method === "POST") {
@@ -234,6 +246,7 @@ export function handleAdminRequest(
               session.token,
               ADMIN_SESSION_EXPIRY_SECONDS,
               host,
+              req.headers["x-forwarded-proto"],
             ),
           });
           res.end(
@@ -265,7 +278,7 @@ export function handleAdminRequest(
       events.closeSocketsFor([auth.credentialId]);
       res.writeHead(200, {
         "content-type": "application/json",
-        "set-cookie": cookieSetCookieHeader("", 0, host),
+        "set-cookie": cookieSetCookieHeader("", 0, host, req.headers["x-forwarded-proto"]),
       });
       res.end(JSON.stringify({ success: true }));
       return true;
