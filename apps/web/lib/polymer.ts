@@ -8,10 +8,20 @@ export function apiUrl(): string {
 
 export const ADMIN_COOKIE = "__Host-polymer_admin";
 
+/**
+ * Plain-HTTP fallback session cookie. A `__Host-` cookie without the
+ * Secure flag is rejected outright by browsers, and a Secure cookie is
+ * dropped over http:// — so on a non-TLS browser connection the session
+ * lives here instead. Server-to-backend calls always use ADMIN_COOKIE.
+ */
+export const ADMIN_COOKIE_HTTP = "polymer_admin";
+
 /** The administrator session token from the browser cookie, if any. */
 export async function sessionToken(): Promise<string | undefined> {
   const jar = await cookies();
-  return jar.get(ADMIN_COOKIE)?.value;
+  return (
+    jar.get(ADMIN_COOKIE)?.value ?? jar.get(ADMIN_COOKIE_HTTP)?.value
+  );
 }
 
 export interface BackendError {

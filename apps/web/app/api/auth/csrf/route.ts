@@ -1,5 +1,4 @@
-import { cookies } from "next/headers";
-import { ADMIN_COOKIE, apiUrl } from "@/lib/polymer";
+import { ADMIN_COOKIE, apiUrl, sessionToken } from "@/lib/polymer";
 
 /**
  * Component 21: same-origin CSRF reader for the useEvents hook.
@@ -7,8 +6,7 @@ import { ADMIN_COOKIE, apiUrl } from "@/lib/polymer";
  * the token (it guards mutations, not reads).
  */
 export async function GET(): Promise<Response> {
-  const jar = await cookies();
-  const token = jar.get(ADMIN_COOKIE)?.value;
+  const token = await sessionToken();
   if (token === undefined) {
     return Response.json({ error: "invalid_token" }, { status: 401 });
   }

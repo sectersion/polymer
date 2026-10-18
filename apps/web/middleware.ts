@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const ADMIN_COOKIE = "__Host-polymer_admin";
+const ADMIN_COOKIE_HTTP = "polymer_admin";
 
 function apiUrl(): string {
   return (process.env.POLYMER_API_URL ?? "http://127.0.0.1:8080").replace(
@@ -17,7 +18,9 @@ function apiUrl(): string {
  * revoked or expired session redirects too.
  */
 export async function middleware(req: NextRequest): Promise<NextResponse> {
-  const token = req.cookies.get(ADMIN_COOKIE)?.value;
+  const token =
+    req.cookies.get(ADMIN_COOKIE)?.value ??
+    req.cookies.get(ADMIN_COOKIE_HTTP)?.value;
   if (token === undefined) {
     return NextResponse.redirect(new URL("/login", req.url));
   }
@@ -33,8 +36,9 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   }
   if (res.status === 401) {
     const redirect = NextResponse.redirect(new URL("/login", req.url));
-    // Drop the dead credential on the way out.
+    // Drop the dead credential on the way out (both variants).
     redirect.cookies.delete(ADMIN_COOKIE);
+    redirect.cookies.delete(ADMIN_COOKIE_HTTP);
     return redirect;
   }
   return NextResponse.next();

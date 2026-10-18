@@ -22,5 +22,9 @@ WORKDIR /app
 # Monorepo standalone layout nests the runner one level deep.
 COPY --from=build /app/apps/web/.next/standalone ./
 COPY --from=build /app/apps/web/.next/static ./apps/web/.next/static
+# Front door: proxies /api/events WebSocket upgrades to the backend
+# (Next alone cannot), everything else to the stock server below.
+COPY --from=build /app/apps/web/proxy-server.mjs ./apps/web/proxy-server.mjs
+ENV NEXT_PORT=3001
 EXPOSE 3000
-CMD ["node", "apps/web/server.js"]
+CMD ["node", "apps/web/proxy-server.mjs"]
