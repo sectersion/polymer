@@ -93,7 +93,7 @@ describe("REST reads (component 18)", () => {
       const agents = await jsonBody(
         await restGet(app.url, "/api/agents", cookie),
       );
-      expect(Object.keys(agents).sort()).toEqual(["agents"]);
+      expect(Object.keys(agents).sort()).toEqual(["agents", "next_cursor"]);
       expect(
         (agents["agents"] as Array<Record<string, unknown>>).find(
           (x) => x["agent_id"] === b.agentId,

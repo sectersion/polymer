@@ -107,3 +107,75 @@ export function disableAgentSubtree(
   }
   return { success: true, disabled_count: disabledCount, complete: true };
 }
+
+export interface ReenableResult {
+  success: true;
+  reenabled_count: number;
+  complete: boolean;
+}
+
+/**
+ * Reverse of `disableAgentSubtree`: snapshots the same frozen
+ * lineage, then flips `disabled -> idle` in bounded batches of 500
+ * per transaction, one `agent.reenable.batch` audit row per
+ * non-empty batch. Idempotent (retries flip nothing, audit nothing).
+ * Only `disabled` rows flip: members re-disabled concurrently keep
+ * their status via the `status = 'disabled'` guard. Task leases are
+ * untouched — a re-enabled agent claims like any other agent.
+ */
+export function reenableAgentSubtree(
+  db: PolymerDatabase,
+  agentId: string,
+  actorSessionId: string,
+  onBatch?: (newlyReenabledIds: string[]) => void,
+): ReenableResult {
+  const root = db
+    .prepare("SELECT agent_id FROM agents WHERE agent_id = ?")
+    .get(agentId) as { agent_id: string } | undefined;
+  if (root === undefined) {
+    throw new AgentNotFoundError(agentId);
+  }
+  const subtree = db
+    .prepare(
+      `WITH RECURSIVE lineage(agent_id) AS (
+         SELECT ? AS agent_id
+         UNION
+         SELECT agents.agent_id FROM agents
+         JOIN lineage ON agents.parent_agent_id = lineage.agent_id
+       )
+       SELECT agent_id FROM lineage`,
+    )
+    .all(agentId) as Array<{ agent_id: string }>;
+  const ids = subtree.map((r) => r.agent_id);
+
+  let reenabledCount = 0;
+  for (let i = 0; i < ids.length; i += DISABLE_BATCH_SIZE) {
+    const batch = ids.slice(i, i + DISABLE_BATCH_SIZE);
+    const placeholders = batch.map(() => "?").join(",");
+    const write = db.transaction(() => {
+      const flipped = db
+        .prepare(
+          `UPDATE agents SET status = 'idle'
+            WHERE agent_id IN (${placeholders}) AND status = 'disabled'
+            RETURNING agent_id`,
+        )
+        .all(...batch) as Array<{ agent_id: string }>;
+      if (flipped.length > 0) {
+        recordAudit(db, {
+          actor_type: "admin_session",
+          actor_id: actorSessionId,
+          action: "agent.reenable.batch",
+          before: null,
+          after: {
+            reenabled_count: flipped.length,
+            reenabled_agents: flipped.map((r) => r.agent_id),
+          },
+        });
+      }
+      onBatch?.(flipped.map((r) => r.agent_id));
+      return flipped.length;
+    });
+    reenabledCount += Number(write.immediate());
+  }
+  return { success: true, reenabled_count: reenabledCount, complete: true };
+}
