@@ -3,6 +3,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { pushToast } from "@/lib/toasts";
 
 export function DisableButton({
   agentId,
@@ -13,7 +14,6 @@ export function DisableButton({
 }): React.JSX.Element {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function disable(): Promise<void> {
@@ -26,10 +26,13 @@ export function DisableButton({
     };
     setBusy(false);
     if (!res.ok) {
-      setResult("Disable failed — see server logs.");
+      pushToast({ kind: "error", message: "Disable failed — see server logs." });
       return;
     }
-    setResult(`Disabled ${body.disabled_count ?? 0} agent(s) in the subtree.`);
+    pushToast({
+      kind: "success",
+      message: `Disabled ${body.disabled_count ?? 0} agent(s) in the subtree.`,
+    });
     setOpen(false);
     router.refresh();
   }
@@ -74,7 +77,6 @@ export function DisableButton({
           </div>
         </Dialog.Content>
       </Dialog.Portal>
-      {result !== null && <p className="mt-2 text-sm">{result}</p>}
     </Dialog.Root>
   );
 }

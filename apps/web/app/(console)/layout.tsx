@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ToastStack } from "@/lib/toasts";
 import { LogoutButton } from "./logout-button";
 import { ThemeToggle } from "./theme-toggle";
 
@@ -46,6 +47,9 @@ export default function ConsoleLayout({
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+      {/* Single shared toast mount for the whole console: individual
+          buttons only push, never mount their own stack. */}
+      <ToastStack />
     </div>
   );
 }

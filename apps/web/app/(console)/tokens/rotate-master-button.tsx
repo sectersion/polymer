@@ -3,6 +3,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { pushToast } from "@/lib/toasts";
 
 export function RotateMasterButton(): React.JSX.Element {
   const router = useRouter();
@@ -20,6 +21,14 @@ export function RotateMasterButton(): React.JSX.Element {
     if (res.ok && typeof body.master_credential === "string") {
       // Shown exactly once, never stored.
       setRevealed(body.master_credential);
+      pushToast({
+        kind: "success",
+        message: "Master credential rotated — copy the new one now.",
+        copyText: body.master_credential,
+        durationMs: 30000,
+      });
+    } else {
+      pushToast({ kind: "error", message: "Rotation failed — try again." });
     }
     setOpen(false);
     router.refresh();

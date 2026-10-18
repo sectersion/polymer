@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { pushToast } from "@/lib/toasts";
 
 interface MintedToken {
   init_token_id: string;
@@ -24,7 +25,6 @@ function secondsLeft(expiresAt: string): number {
  */
 export function MintTokenButton(): React.JSX.Element {
   const [token, setToken] = useState<MintedToken | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Ticks once a second while a token is displayed so the countdown
   // re-renders from the server-provided expires_at.
@@ -38,7 +38,6 @@ export function MintTokenButton(): React.JSX.Element {
 
   async function mint(): Promise<void> {
     setBusy(true);
-    setError(null);
     const res = await fetch("/api/tokens/init", { method: "POST" });
     const body = (await res
       .json()
@@ -47,10 +46,20 @@ export function MintTokenButton(): React.JSX.Element {
     };
     setBusy(false);
     if (!res.ok || typeof body.init_token !== "string") {
-      setError(`Mint failed (${body.error ?? res.status}).`);
+      pushToast({
+        kind: "error",
+        message: `Mint failed (${body.error ?? res.status}).`,
+      });
       return;
     }
-    setToken(body as MintedToken);
+    const minted = body as MintedToken;
+    setToken(minted);
+    pushToast({
+      kind: "success",
+      message: "Init token minted — shown once, copy it now.",
+      copyText: `POLYMER_INIT_TOKEN_ID=${minted.init_token_id}\nPOLYMER_INIT_TOKEN=${minted.init_token}`,
+      durationMs: 30000,
+    });
   }
 
   const remaining = token !== null ? secondsLeft(token.expires_at) : 0;
@@ -81,7 +90,6 @@ export function MintTokenButton(): React.JSX.Element {
       >
         Mint init token
       </button>
-      {error !== null && <p className="mt-2 text-sm text-red-600">{error}</p>}
       {token !== null && remaining > 0 && (
         <div className="mt-4 max-w-md rounded-lg border border-(--color-hairline) bg-white p-4 shadow-sm">
           <p className="text-sm text-gray-500">
