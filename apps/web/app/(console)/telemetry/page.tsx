@@ -12,7 +12,7 @@ import { UsageTable } from "./usage-table";
 function Card({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-(--color-hairline) bg-(--color-card) p-5 shadow-sm">
-      <div className="text-sm text-gray-500">{label}</div>
+      <div className="text-sm text-gray-500 dark:text-gray-400">{label}</div>
       <div className="mt-1 text-3xl font-semibold tabular-nums">{value}</div>
     </div>
   );
@@ -32,9 +32,16 @@ export default async function TelemetryPage(): Promise<React.JSX.Element> {
     fetchTimeline(20),
   ]);
   const peak = Math.max(1, ...costs.map((b) => b.cost_micro_usd));
+  const renderedAt = new Date().toISOString();
   return (
     <div>
-      <h1 className="text-2xl font-semibold tracking-tight">Telemetry</h1>
+      <h1 className="page-title">Telemetry</h1>
+      <p className="page-subtitle">
+        Usage and cost · rendered{" "}
+        <time dateTime={renderedAt} title={renderedAt}>
+          {new Date(renderedAt).toLocaleString()}
+        </time>
+      </p>
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         <Card
           label="Tokens used"
@@ -50,7 +57,7 @@ export default async function TelemetryPage(): Promise<React.JSX.Element> {
       </div>
 
       <h2 className="mt-8 text-lg font-semibold">Cost per day</h2>
-      <div className="mt-2 rounded-lg border border-(--color-hairline) bg-(--color-card) p-5 shadow-sm">
+      <div className="mt-2 rounded-lg border border-(--color-hairline) bg-(--color-card-elevated) p-5 shadow-sm">
         {costs.length === 0 ? (
           <EmptyState
             title="No costs recorded yet"
@@ -62,10 +69,10 @@ export default async function TelemetryPage(): Promise<React.JSX.Element> {
               key={bucket.bucket_start}
               className="flex items-center gap-3 py-1"
             >
-              <div className="w-28 shrink-0 font-mono text-xs text-gray-500">
+              <div className="w-28 shrink-0 font-mono text-xs text-gray-500 dark:text-gray-400">
                 {bucket.bucket_start.slice(0, 10)}
               </div>
-              <div className="h-4 flex-1 rounded bg-gray-100">
+              <div className="h-4 flex-1 rounded bg-gray-100 dark:bg-gray-800">
                 <div
                   className="h-4 rounded bg-(--color-accent)"
                   style={{
@@ -82,14 +89,14 @@ export default async function TelemetryPage(): Promise<React.JSX.Element> {
       </div>
 
       <h2 className="mt-8 text-lg font-semibold">Agents</h2>
-      <div className="mt-2 rounded-lg border border-(--color-hairline) bg-(--color-card) p-2 shadow-sm">
+      <div className="mt-2 rounded-lg border border-(--color-hairline) bg-(--color-card-elevated) p-2 shadow-sm">
         <AgentTelemetryTable rows={agents} />
       </div>
 
       <BreakdownBars />
 
       <h2 className="mt-8 text-lg font-semibold">Latest usage</h2>
-      <div className="mt-2 rounded-lg border border-(--color-hairline) bg-(--color-card) p-2 shadow-sm">
+      <div className="mt-2 rounded-lg border border-(--color-hairline) bg-(--color-card-elevated) p-2 shadow-sm">
         <UsageTable events={events} />
       </div>
     </div>
