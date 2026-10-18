@@ -151,14 +151,23 @@ export interface ListTasksInput {
   status?: string;
   createdBy?: string;
   assignedTo?: string;
+  coordinator?: string;
+  q?: string;
+  orderBy?: string;
+  orderDir?: string;
   limit?: number;
+  cursor?: string;
 }
 
 /**
- * Component 10 (extended in 12): list tasks, newest last. `limit`
- * defaults to 50 and caps at 500 (mirrors the MCP/REST list
- * conventions). `assignedTo` filters to tasks holding an assignment
- * row for that agent.
+ * Component 10 (extended in 12): list tasks. `limit` defaults to 50
+ * and caps at 500 (mirrors the MCP/REST list conventions).
+ * `assignedTo` filters to tasks holding an assignment row for that
+ * agent. `coordinator` filters to the current owning agent. `q` is a
+ * case-insensitive substring match on `title`. `orderBy` is
+ * `created_at` (default) or `updated_at`; `orderDir` is `asc`
+ * (default) or `desc`. Ordering tie-breaks on rowid so pagination is
+ * stable. `cursor` pages forward from the last returned rowid.
  */
 export function listTasks(
   db: PolymerDatabase,
@@ -167,18 +176,33 @@ export function listTasks(
   if (input.status !== undefined && !isTaskStatus(input.status)) {
     throw new TaskInvalidStatusError(input.status);
   }
+  const order = normalizeOrder(input);
   const limit = input.limit ?? 50;
   if (!Number.isInteger(limit) || limit <= 0 || limit > 500) {
     throw new Error("limit must be an integer between 1 and 500");
   }
+  const desc = order.orderDir === "DESC";
+  const cursorRowid =
+    input.cursor === undefined ? undefined : decodeCursor(input.cursor);
   const where = taskWhere(input);
+  const joiner = where.sql.length > 0 ? " AND" : " WHERE";
+  const cursorSql =
+    cursorRowid === undefined
+      ? ""
+      : desc
+        ? `${joiner} rowid < ?`
+        : `${joiner} rowid > ?`;
+  const params: unknown[] =
+    cursorRowid === undefined
+      ? [...where.params, limit]
+      : [...where.params, cursorRowid, limit];
   const rows = db
     .prepare(
       `SELECT ${TASK_COLUMNS} FROM tasks
-       ${where.sql}
-       ORDER BY created_at ASC, rowid ASC LIMIT ?`,
+       ${where.sql}${cursorSql}
+       ORDER BY ${order.orderBy} ${order.orderDir}, rowid ${order.orderDir} LIMIT ?`,
     )
-    .all(...where.params, limit) as Record<string, unknown>[];
+    .all(...params) as Record<string, unknown>[];
   return rows.map(toTask);
 }
 
@@ -234,6 +258,31 @@ export interface TaskFilters {
   status?: string;
   createdBy?: string;
   assignedTo?: string;
+  coordinator?: string;
+  q?: string;
+  orderBy?: string;
+  orderDir?: string;
+}
+
+/** Ordering for both list shapes; unknown values are invalid_request. */
+function normalizeOrder(input: { orderBy?: string; orderDir?: string }): {
+  orderBy: "created_at" | "updated_at";
+  orderDir: "ASC" | "DESC";
+} {
+  const orderBy = input.orderBy === undefined ? "created_at" : input.orderBy;
+  if (orderBy !== "created_at" && orderBy !== "updated_at") {
+    throw catalogError("invalid_request");
+  }
+  const dir = (input.orderDir ?? "asc").toLowerCase();
+  if (dir !== "asc" && dir !== "desc") {
+    throw catalogError("invalid_request");
+  }
+  return { orderBy, orderDir: dir === "desc" ? "DESC" : "ASC" };
+}
+
+/** Escape LIKE wildcards so `q` is always a literal substring match. */
+function escapeLike(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
 }
 
 /** Shared WHERE construction for both list shapes (MCP + REST). */
@@ -259,6 +308,14 @@ function taskWhere(input: TaskFilters): { sql: string; params: unknown[] } {
     );
     params.push(input.assignedTo);
   }
+  if (input.coordinator !== undefined) {
+    where.push("coordinator = ?");
+    params.push(input.coordinator);
+  }
+  if (input.q !== undefined) {
+    where.push("title LIKE ? ESCAPE '\\'");
+    params.push(`%${escapeLike(input.q)}%`);
+  }
   return {
     sql: where.length > 0 ? `WHERE ${where.join(" AND ")}` : "",
     params,
@@ -271,31 +328,45 @@ export interface ListTasksPageInput extends TaskFilters {
 }
 
 /**
- * Component 18: cursor-paginated task read for the REST surface (the
- * MCP tool keeps its limit-only contract — no cursor param there, by
- * design). Same ordering and limits as listTasks; `next_cursor` is
- * null once the collection is exhausted.
+ * Component 18: cursor-paginated task read. Shares the rowid cursor
+ * grammar and the filter/ordering surface with listTasks; MCP
+ * get_tasks mirrors this grammar (same `cursor` param, same
+ * `next_cursor` shape). `next_cursor` is null once exhausted.
  */
 export function listTasksPage(
   db: PolymerDatabase,
   input: ListTasksPageInput = {},
 ): { tasks: Task[]; next_cursor: string | null } {
+  if (input.status !== undefined && !isTaskStatus(input.status)) {
+    throw new TaskInvalidStatusError(input.status);
+  }
+  const order = normalizeOrder(input);
   const limit = input.limit ?? 50;
   if (!Number.isInteger(limit) || limit <= 0 || limit > 500) {
     throw new Error("limit must be an integer between 1 and 500");
   }
+  const desc = order.orderDir === "DESC";
   const cursorRowid =
-    input.cursor === undefined ? 0 : decodeCursor(input.cursor);
+    input.cursor === undefined ? undefined : decodeCursor(input.cursor);
   const where = taskWhere(input);
+  const joiner = where.sql.length > 0 ? " AND" : " WHERE";
+  const cursorSql =
+    cursorRowid === undefined
+      ? ""
+      : desc
+        ? `${joiner} rowid < ?`
+        : `${joiner} rowid > ?`;
+  const params: unknown[] =
+    cursorRowid === undefined
+      ? [...where.params, limit + 1]
+      : [...where.params, cursorRowid, limit + 1];
   const rows = db
     .prepare(
       `SELECT rowid AS _rowid, ${TASK_COLUMNS} FROM tasks
-       ${where.sql}${where.sql.length > 0 ? " AND rowid > ?" : " WHERE rowid > ?"}
-       ORDER BY created_at ASC, rowid ASC LIMIT ?`,
+       ${where.sql}${cursorSql}
+       ORDER BY ${order.orderBy} ${order.orderDir}, rowid ${order.orderDir} LIMIT ?`,
     )
-    .all(...where.params, cursorRowid, limit + 1) as Array<
-    Record<string, unknown> & { _rowid: number }
-  >;
+    .all(...params) as Array<Record<string, unknown> & { _rowid: number }>;
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
   return {

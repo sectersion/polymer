@@ -670,3 +670,152 @@ export function adminTransferCoordinator(
   });
   return write.immediate();
 }
+
+export interface BulkStatusItem {
+  task_id: string;
+  ok: boolean;
+  status?: TaskStatus;
+  version?: number;
+  error?: string;
+}
+export function adminBulkUpdateStatus(
+  db: PolymerDatabase,
+  taskIds: string[],
+  actorSessionId: string,
+  status: TaskStatus,
+): { results: BulkStatusItem[] } {
+  const results: BulkStatusItem[] = [];
+  for (const taskId of [...new Set(taskIds)]) {
+    try {
+      const task = getTask(db, taskId);
+      if (task === undefined) throw new TaskNotFoundError(taskId);
+      assertTaskTransition(task.status, status);
+      const before = auditSnapshot(task);
+      const version = task.version + 1;
+      const leaseGeneration = task.lease_generation + 1;
+      const now = new Date().toISOString();
+      const clearsLease = status === "done" || status === "failed";
+      const updated = db
+        .prepare(
+          "UPDATE tasks SET status = ?, version = ?, lease_expires_at = ?, lease_generation = ?, updated_at = ? WHERE task_id = ? AND version = ?",
+        )
+        .run(
+          status,
+          version,
+          clearsLease ? null : task.lease_expires_at,
+          leaseGeneration,
+          now,
+          task.task_id,
+          task.version,
+        );
+      if (updated.changes !== 1)
+        throw new TaskVersionMismatchError(task.task_id);
+      recordAudit(db, {
+        actor_type: "admin_session",
+        actor_id: actorSessionId,
+        action: "task.status.bypass",
+        task_id: task.task_id,
+        before,
+        after: auditSnapshot({
+          status,
+          coordinator: task.coordinator,
+          version,
+          lease_generation: leaseGeneration,
+          lease_expires_at: clearsLease ? null : task.lease_expires_at,
+        }),
+      });
+      results.push({ task_id: taskId, ok: true, status, version });
+    } catch (err) {
+      results.push({
+        task_id: taskId,
+        ok: false,
+        error:
+          err instanceof Error && "code" in err
+            ? String((err as Error & { code: string }).code)
+            : err instanceof Error
+              ? err.message
+              : "unknown",
+      });
+    }
+  }
+  return { results };
+}
+export interface BulkAssignItem {
+  task_id: string;
+  ok: boolean;
+  assigned_to?: string[];
+  version?: number;
+  error?: string;
+}
+export function adminBulkAssign(
+  db: PolymerDatabase,
+  taskIds: string[],
+  actorSessionId: string,
+  agentIds: string[],
+): { results: BulkAssignItem[] } {
+  const results: BulkAssignItem[] = [];
+  for (const taskId of [...new Set(taskIds)]) {
+    try {
+      const targets = [...new Set(agentIds)];
+      if (targets.length === 0) throw new Error("agent_ids must not be empty");
+      const task = getTask(db, taskId);
+      if (task === undefined) throw new TaskNotFoundError(taskId);
+      for (const agentId of targets) {
+        if (getAgentById(db, agentId) === undefined)
+          throw new TaskAgentNotFoundError(agentId);
+      }
+      const existing = listTaskAssignees(db, taskId);
+      for (const agentId of targets) {
+        if (existing.some((x) => x.agent_id === agentId))
+          throw new TaskAlreadyAssignedError(task.task_id, agentId);
+      }
+      const before = auditSnapshot(task);
+      const now = new Date().toISOString();
+      const insert = db.prepare(
+        "INSERT INTO task_assignments (task_id, agent_id, assigned_at) VALUES (?, ?, ?)",
+      );
+      for (const agentId of targets) insert.run(task.task_id, agentId, now);
+      const version = task.version + 1;
+      const leaseGeneration = task.lease_generation + 1;
+      const updated = db
+        .prepare(
+          "UPDATE tasks SET version = ?, lease_generation = ?, updated_at = ? WHERE task_id = ? AND version = ?",
+        )
+        .run(version, leaseGeneration, now, task.task_id, task.version);
+      if (updated.changes !== 1)
+        throw new TaskVersionMismatchError(task.task_id);
+      recordAudit(db, {
+        actor_type: "admin_session",
+        actor_id: actorSessionId,
+        action: "task.assign.bypass",
+        task_id: task.task_id,
+        before,
+        after: auditSnapshot({
+          status: task.status,
+          coordinator: task.coordinator,
+          version,
+          lease_generation: leaseGeneration,
+          lease_expires_at: task.lease_expires_at,
+        }),
+      });
+      results.push({
+        task_id: taskId,
+        ok: true,
+        assigned_to: listTaskAssignees(db, task.task_id).map((a) => a.agent_id),
+        version,
+      });
+    } catch (err) {
+      results.push({
+        task_id: taskId,
+        ok: false,
+        error:
+          err instanceof Error && "code" in err
+            ? String((err as Error & { code: string }).code)
+            : err instanceof Error
+              ? err.message
+              : "unknown",
+      });
+    }
+  }
+  return { results };
+}

@@ -10,7 +10,7 @@ import {
   createTask,
   getTaskDetail,
   listTaskAssignees,
-  listTasks,
+  listTasksPage,
   requestUnassignment,
   serializeTaskDetail,
   taskListItem,
@@ -125,7 +125,12 @@ export function registerTaskTools(
         status: z.string().optional(),
         created_by: z.string().optional(),
         assigned_to: z.string().optional(),
+        coordinator: z.string().optional(),
+        q: z.string().optional(),
+        order_by: z.enum(["created_at", "updated_at"]).optional(),
+        order_dir: z.enum(["asc", "desc"]).optional(),
         limit: z.number().int().min(1).max(500).optional(),
+        cursor: z.string().optional(),
       },
     },
     async (args, extra) => {
@@ -141,23 +146,32 @@ export function registerTaskTools(
         // the statements cannot produce a torn composite (e.g. a fresh
         // version paired with stale assigned_to).
         const tasks = db.transaction(() => {
-          const rows = listTasks(db, {
+          const page = listTasksPage(db, {
             status: args.status,
             createdBy: args.created_by,
             assignedTo: args.assigned_to,
+            coordinator: args.coordinator,
+            q: args.q,
+            orderBy: args.order_by,
+            orderDir: args.order_dir,
             limit: args.limit,
+            cursor: args.cursor,
           });
-          return rows.map((task) => ({
-            task,
-            assigneeIds: listTaskAssignees(db, task.task_id).map(
-              (a) => a.agent_id,
-            ),
-          }));
+          return {
+            tasks: page.tasks.map((task) => ({
+              task,
+              assigneeIds: listTaskAssignees(db, task.task_id).map(
+                (a) => a.agent_id,
+              ),
+            })),
+            next_cursor: page.next_cursor,
+          };
         })();
         return toolResult({
-          tasks: tasks.map(({ task, assigneeIds }) =>
+          tasks: tasks.tasks.map(({ task, assigneeIds }) =>
             taskListItem(task, assigneeIds),
           ),
+          next_cursor: tasks.next_cursor,
         });
       } catch (err) {
         taskToolError(err);
