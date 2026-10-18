@@ -249,7 +249,9 @@ describe("Telemetry page (loose-end C)", () => {
       expect(res.status).toBe(200);
       const html = await res.text();
       expect(html).toContain("Tokens");
-      expect(html).toContain("Cost (µUSD)");
+      // Cost card shows formatted dollars; the raw µUSD lives in the tooltip.
+      expect(html).toContain(">Cost<");
+      expect(html).toContain("µUSD");
     },
   );
 });

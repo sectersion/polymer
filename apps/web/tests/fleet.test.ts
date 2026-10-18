@@ -195,10 +195,12 @@ describe("Fleet page (component 20)", () => {
     expect(html).toContain("Tasks");
     expect(html).toContain("Active");
     // One agent, one task, one active (claimed) task; no telemetry yet.
+    // Cost renders as formatted dollars (raw µUSD lives in the tooltip).
     const counts = [...html.matchAll(/tabular-nums">([\d,]+)</g)].map(
       (m) => m[1],
     );
-    expect(counts).toEqual(["1", "1", "1", "0", "0"]);
+    expect(counts).toEqual(["1", "1", "1", "0"]);
+    expect(html).toContain("$0.00");
     // The live-region hook is wired: pushes and poll refreshes call
     // router.refresh(), so the next navigation shows fresh state.
     expect(html).toContain('data-testid="fleet-live"');
@@ -235,7 +237,8 @@ describe("Fleet page (component 20)", () => {
       const counts = [...html.matchAll(/tabular-nums">([\d,]+)</g)].map(
         (m) => m[1],
       );
-      expect(counts).toEqual(["1", "2", "1", "0", "0"]);
+      expect(counts).toEqual(["1", "2", "1", "0"]);
+      expect(html).toContain("$0.00");
     },
   );
 
