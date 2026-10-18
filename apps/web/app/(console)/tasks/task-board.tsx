@@ -10,6 +10,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { TaskItem } from "@/lib/polymer";
+import { ToastStack, pushToast } from "@/lib/toasts";
 
 const COLUMNS = ["to_do", "in_progress", "done", "failed"] as const;
 
@@ -75,16 +76,31 @@ export function TaskBoard({
   initial: TaskItem[];
 }): React.JSX.Element {
   const router = useRouter();
-  const [notice, setNotice] = useState<string | null>(null);
   const [force, setForce] = useState(false);
   const [tasks, setTasks] = useState(initial);
+
+  async function revertMove(previous: TaskItem): Promise<void> {
+    await fetch(`/api/tasks/${previous.task_id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        status: previous.status,
+        expected_version: previous.version,
+        lease_generation: previous.lease_generation,
+      }),
+    });
+    setTasks((prev) =>
+      prev.map((t) => (t.task_id === previous.task_id ? previous : t)),
+    );
+    router.refresh();
+  }
 
   async function onDragEnd(event: DragEndEvent): Promise<void> {
     const { active, over } = event;
     if (over === null || over.id === active.id) return;
     const task = tasks.find((t) => t.task_id === active.id);
     if (task === undefined || task.status === over.id) return;
-    setNotice(null);
+    const previous = { ...task };
     const res = await fetch(`/api/tasks/${task.task_id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -100,9 +116,10 @@ export function TaskBoard({
       version?: number;
     };
     if (!res.ok) {
-      setNotice(
-        `Drop rejected (${body.error ?? res.status}). No change applied.`,
-      );
+      pushToast({
+        kind: "error",
+        message: `Drop rejected (${body.error ?? res.status}). No change applied.`,
+      });
       return;
     }
     setTasks((prev) =>
@@ -116,11 +133,14 @@ export function TaskBoard({
           : t,
       ),
     );
-    setNotice(
-      force
+    pushToast({
+      kind: "success",
+      message: force
         ? `Moved with force — lease bypass, audit-logged (v${body.version}).`
         : `Moved to ${over.id} (v${body.version}).`,
-    );
+      actionLabel: "Undo",
+      onAction: () => void revertMove(previous),
+    });
     router.refresh();
   }
 
@@ -134,11 +154,7 @@ export function TaskBoard({
         />
         Force drop (lease-bypassing, audit-logged)
       </label>
-      {notice !== null && (
-        <p className="mt-2 rounded-md border border-(--color-hairline) bg-white px-3 py-2 text-sm">
-          {notice}
-        </p>
-      )}
+      <ToastStack />
       <DndContext onDragEnd={(e) => void onDragEnd(e)}>
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-4">
           {COLUMNS.map((status) => (
