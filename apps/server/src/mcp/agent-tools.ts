@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { PolymerDatabase } from "../database/db.js";
 import type { EventBus } from "../http/events.js";
 import { registerAgent, registerSubagent } from "../identity/registration.js";
-import { getAgentById, listAgents } from "../identity/agents.js";
+import { getAgentById, listAgentsPage } from "../identity/agents.js";
 import {
   HeartbeatUnauthorizedError,
   recordHeartbeat,
@@ -14,6 +14,7 @@ import {
   callerAgentId,
   heartbeatSchema,
   registrationError,
+  taskToolError,
   toolResult,
 } from "./shared.js";
 
@@ -116,25 +117,53 @@ export function registerAgentTools(
     "get_agent_roster",
     {
       description:
-        "List fleet agents with liveness state (session auth only; any authenticated agent may read)",
-      inputSchema: {},
+        "List fleet agents with liveness state (session auth only; any authenticated agent may read). Exact-match status/role/parent_agent_id filters; limit default 50, max 500, opaque cursor.",
+      inputSchema: {
+        status: z.string().optional(),
+        role: z.string().optional(),
+        parent_agent_id: z.string().optional(),
+        limit: z.number().int().positive().max(500).optional(),
+        cursor: z.string().optional(),
+      },
     },
-    async (_args, extra) => {
+    async (args, extra) => {
       if (db === null) {
         throw new McpError(ErrorCode.InternalError, "database_error");
       }
       if (callerAgentId(extra) === undefined) {
         throw new McpError(ErrorCode.InvalidRequest, "unauthorized");
       }
-      const agents = listAgents(db).map((agent) => ({
-        agent_id: agent.agent_id,
-        name: agent.name,
-        role: agent.role,
-        status: agent.status,
-        last_seen: agent.last_seen,
-        parent_agent_id: agent.parent_agent_id,
-      }));
-      return toolResult({ agents });
+      try {
+        const page = listAgentsPage(db, {
+          status: args.status,
+          role: args.role,
+          parentAgentId: args.parent_agent_id,
+          limit: args.limit,
+          cursor: args.cursor,
+        });
+        return toolResult({
+          agents: page.agents.map((agent) => ({
+            agent_id: agent.agent_id,
+            name: agent.name,
+            role: agent.role,
+            status: agent.status,
+            last_seen: agent.last_seen,
+            parent_agent_id: agent.parent_agent_id,
+          })),
+          next_cursor: page.next_cursor,
+        });
+      } catch (err) {
+        const code = (err as { code?: unknown } | undefined)?.code;
+        if (
+          typeof code === "string" &&
+          (code === "invalid_status" ||
+            code === "invalid_cursor" ||
+            code === "invalid_request")
+        ) {
+          throw new McpError(ErrorCode.InvalidRequest, code);
+        }
+        taskToolError(err);
+      }
     },
   );
   server.registerTool(
@@ -174,6 +203,8 @@ export function registerAgentTools(
         status: agent.status,
         last_seen: agent.last_seen,
         connected_at: agent.connected_at,
+        parent_agent_id: agent.parent_agent_id,
+        heartbeat_timeout_seconds: agent.heartbeat_timeout_seconds,
         tasks_created: tasksCreated,
         tasks_assigned: tasksAssigned,
       });

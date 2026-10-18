@@ -57,6 +57,22 @@ export class InvalidAgentStatusError extends Error {
   }
 }
 
+export class InvalidAgentRoleError extends Error {
+  readonly code = "invalid_role";
+  constructor(role: string) {
+    super(`invalid agent role: ${role}`);
+    this.name = "InvalidAgentRoleError";
+  }
+}
+
+export class InvalidCursorError extends Error {
+  readonly code = "invalid_cursor";
+  constructor() {
+    super("invalid_cursor");
+    this.name = "InvalidCursorError";
+  }
+}
+
 function isAgentStatus(value: string): value is AgentStatus {
   return (AGENT_STATUSES as readonly string[]).includes(value);
 }
@@ -166,6 +182,142 @@ export function listAgents(db: PolymerDatabase): Agent[] {
     )
     .all() as Record<string, unknown>[];
   return rows.map(toAgent);
+}
+
+const AGENT_COLUMNS = `agent_id, name, role, parent_agent_id, status,
+              heartbeat_timeout_seconds, last_seen, connected_at, created_at`;
+
+function encodeAgentCursor(rowid: number): string {
+  return Buffer.from(`c${rowid}`, "utf8").toString("base64url");
+}
+
+function decodeAgentCursor(cursor: string): number {
+  let raw = "";
+  try {
+    raw = Buffer.from(cursor, "base64url").toString("utf8");
+  } catch {
+    throw new InvalidCursorError();
+  }
+  if (!raw.startsWith("c")) throw new InvalidCursorError();
+  const rowid = Number(raw.slice(1));
+  if (!Number.isInteger(rowid) || rowid < 0) throw new InvalidCursorError();
+  return rowid;
+}
+
+export interface ListAgentsPageInput {
+  status?: string;
+  role?: string;
+  parentAgentId?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+/**
+ * Filtered, cursor-paginated roster shared by REST `GET /api/agents`
+ * and MCP `get_agent_roster` (parity). Filters are exact matches;
+ * `status` is validated against the catalog (`invalid_status`),
+ * unknown cursors fail with `invalid_cursor`. Ordering matches
+ * `listAgents` (created_at, rowid); `next_cursor` is null at the end.
+ */
+export function listAgentsPage(
+  db: PolymerDatabase,
+  input: ListAgentsPageInput = {},
+): { agents: Agent[]; next_cursor: string | null } {
+  const limit = input.limit ?? 50;
+  if (!Number.isInteger(limit) || limit <= 0 || limit > 500) {
+    const err = new Error("invalid_request") as Error & { code: string };
+    err.code = "invalid_request";
+    throw err;
+  }
+  const cursorRowid =
+    input.cursor === undefined ? 0 : decodeAgentCursor(input.cursor);
+  const where: string[] = ["rowid > ?"];
+  const params: unknown[] = [cursorRowid];
+  if (input.status !== undefined) {
+    if (!isAgentStatus(input.status))
+      throw new InvalidAgentStatusError(input.status);
+    where.push("status = ?");
+    params.push(input.status);
+  }
+  if (input.role !== undefined) {
+    where.push("role = ?");
+    params.push(input.role);
+  }
+  if (input.parentAgentId !== undefined) {
+    where.push("parent_agent_id = ?");
+    params.push(input.parentAgentId);
+  }
+  const rows = db
+    .prepare(
+      `SELECT rowid AS _rowid, ${AGENT_COLUMNS} FROM agents
+       WHERE ${where.join(" AND ")}
+       ORDER BY created_at ASC, rowid ASC LIMIT ?`,
+    )
+    .all(...params, limit + 1) as Array<
+    Record<string, unknown> & { _rowid: number }
+  >;
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  return {
+    agents: page.map(toAgent),
+    next_cursor: hasMore
+      ? encodeAgentCursor(page[page.length - 1]._rowid)
+      : null,
+  };
+}
+
+export interface UpdateAgentProfileInput {
+  name?: string;
+  role?: string;
+}
+
+/**
+ * Rename / role update (admin-only via `PATCH /api/agents/:id`).
+ * Identity still comes from the admin session, never from a body
+ * `agent_id`. UNIQUE on name races maps to `name_taken`, never 500.
+ */
+export function updateAgentProfile(
+  db: PolymerDatabase,
+  agentId: string,
+  input: UpdateAgentProfileInput,
+): Agent {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if (input.name !== undefined) {
+    const name = input.name.trim();
+    if (name === "") {
+      const err = new Error("invalid_request") as Error & { code: string };
+      err.code = "invalid_request";
+      throw err;
+    }
+    sets.push("name = ?");
+    params.push(name);
+  }
+  if (input.role !== undefined) {
+    const role = input.role.trim();
+    if (role === "") throw new InvalidAgentRoleError(input.role);
+    sets.push("role = ?");
+    params.push(role);
+  }
+  if (sets.length === 0) {
+    const err = new Error("invalid_request") as Error & { code: string };
+    err.code = "invalid_request";
+    throw err;
+  }
+  try {
+    const row = db
+      .prepare(
+        `UPDATE agents SET ${sets.join(", ")} WHERE agent_id = ?
+         RETURNING ${AGENT_COLUMNS}`,
+      )
+      .get(...params, agentId) as Record<string, unknown> | undefined;
+    if (!row) throw new AgentNotFoundError(agentId);
+    return toAgent(row);
+  } catch (err) {
+    if (isUniqueViolation(err))
+      throw new AgentNameTakenError((input.name ?? "").trim());
+    throw err;
+  }
 }
 
 export function updateAgentStatus(

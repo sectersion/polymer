@@ -21,8 +21,12 @@ import {
   verifyCredential,
   type AdminSession,
 } from "../identity/credentials.js";
-import { listAudit } from "../identity/audit.js";
-import { disableAgentSubtree } from "../identity/disable.js";
+import { listAudit, recordAudit } from "../identity/audit.js";
+import {
+  disableAgentSubtree,
+  reenableAgentSubtree,
+} from "../identity/disable.js";
+import { updateAgentProfile } from "../identity/agents.js";
 import {
   AdminOpsLimiter,
   LoginLimiter,
@@ -162,9 +166,12 @@ export function isAdminPath(pathname: string, method: string): boolean {
   }
   if (
     pathname.startsWith("/api/agents/") &&
-    pathname.endsWith("/disable") &&
+    (pathname.endsWith("/disable") || pathname.endsWith("/reenable")) &&
     method === "POST"
   ) {
+    return true;
+  }
+  if (pathname.startsWith("/api/agents/") && method === "PATCH") {
     return true;
   }
   return false;
@@ -476,7 +483,7 @@ export function handleAdminRequest(
       return true;
     }
 
-    // --- agent disable ---
+    // --- agent disable / re-enable ---
     if (
       pathname.startsWith("/api/agents/") &&
       pathname.endsWith("/disable") &&
@@ -509,6 +516,93 @@ export function handleAdminRequest(
         });
       }
       sendJson(res, 200, out);
+      return true;
+    }
+
+    if (
+      pathname.startsWith("/api/agents/") &&
+      pathname.endsWith("/reenable") &&
+      req.method === "POST"
+    ) {
+      if (!requireCsrf(req, res, db, auth)) return true;
+      if (!ops.consume(auth.credentialId)) {
+        sendJson(res, 429, { error: "rate_limit_exceeded", retry_after: 60 });
+        return true;
+      }
+      const segments = pathname.split("/").filter((s) => s.length > 0);
+      // /api/agents/:id/reenable — the id is everything between.
+      const targetId = segments.slice(2, -1).join("/");
+      const newlyReenabled: string[] = [];
+      const out = reenableAgentSubtree(
+        db,
+        targetId,
+        auth.credentialId,
+        (ids) => {
+          newlyReenabled.push(...ids);
+        },
+      );
+      for (const id of newlyReenabled) {
+        events.publish("agent.status_changed", {
+          agent_id: id,
+          status: "idle",
+        });
+      }
+      sendJson(res, 200, out);
+      return true;
+    }
+
+    if (pathname.startsWith("/api/agents/") && req.method === "PATCH") {
+      if (!requireCsrf(req, res, db, auth)) return true;
+      if (!ops.consume(auth.credentialId)) {
+        sendJson(res, 429, { error: "rate_limit_exceeded", retry_after: 60 });
+        return true;
+      }
+      const targetId = pathname.slice("/api/agents/".length);
+      void readBody(req, MAX_JSON_BODY_BYTES)
+        .then((result) => {
+          if (result.kind === "too-large") {
+            sendJson(
+              res,
+              413,
+              { error: "payload_too_large" },
+              { connection: "close" },
+            );
+            return;
+          }
+          const patch = (
+            result.kind === "parsed" ? result.value : {}
+          ) as Record<string, unknown>;
+          const name = patch["name"];
+          const role = patch["role"];
+          if (
+            (name !== undefined && typeof name !== "string") ||
+            (role !== undefined && typeof role !== "string") ||
+            (name === undefined && role === undefined)
+          ) {
+            invalidRequest(res);
+            return;
+          }
+          const before = db
+            .prepare("SELECT name, role FROM agents WHERE agent_id = ?")
+            .get(targetId) as { name: string; role: string } | undefined;
+          const updated = updateAgentProfile(db, targetId, {
+            ...(typeof name === "string" ? { name } : {}),
+            ...(typeof role === "string" ? { role } : {}),
+          });
+          recordAudit(db, {
+            actor_type: "admin_session",
+            actor_id: auth.credentialId,
+            action: "agent.profile.update",
+            before: before ?? null,
+            after: { name: updated.name, role: updated.role },
+          });
+          events.publish("agent.status_changed", {
+            agent_id: updated.agent_id,
+            status: updated.status,
+          });
+          sendJson(res, 200, updated);
+        })
+        .catch((err: unknown) => mapServiceError(res, err));
       return true;
     }
 

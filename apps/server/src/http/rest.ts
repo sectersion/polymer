@@ -3,7 +3,7 @@ import { mapServiceError, readAdminCookie, sendJson } from "./common.js";
 import type { PolymerDatabase } from "../database/db.js";
 import {
   getAgentById,
-  listAgents,
+  listAgentsPage,
   AgentNotFoundError,
 } from "../identity/agents.js";
 import { verifyAdminSession } from "../identity/credentials.js";
@@ -83,7 +83,19 @@ export function handleRestRequest(
     const { pathname } = url;
 
     if (pathname === "/api/agents") {
-      sendJson(res, 200, { agents: listAgents(db) });
+      // Filtered/paginated roster: exact-match status/role/parent
+      // filters share the limiting grammar (default 50, max 500).
+      const page = listAgentsPage(db, {
+        status: stringParam(url, "status"),
+        role: stringParam(url, "role"),
+        parentAgentId: stringParam(url, "parent_agent_id"),
+        limit: limitOf(url),
+        cursor: stringParam(url, "cursor"),
+      });
+      sendJson(res, 200, {
+        agents: page.agents,
+        next_cursor: page.next_cursor,
+      });
       return;
     }
     if (pathname.startsWith("/api/agents/")) {
