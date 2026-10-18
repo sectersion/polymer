@@ -28,6 +28,13 @@ const STATUS_DOT: Record<string, string> = {
 
 const PAGE_SIZE = 10;
 
+const STATUS_ICON: Record<string, string> = {
+  idle: "●",
+  working: "◐",
+  error: "✕",
+  disabled: "○",
+};
+
 const columns = [
   columnsHelper.accessor("name", {
     header: "Name",
@@ -35,7 +42,7 @@ const columns = [
     cell: (info) => (
       <Link
         href={`/agents/${info.row.original.agent_id}`}
-        className="font-mono text-(--color-accent) hover:underline"
+        className="font-mono text-(--color-accent) hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--color-accent)"
       >
         {info.getValue()}
       </Link>
@@ -51,6 +58,7 @@ const columns = [
           aria-hidden="true"
           className={`inline-block h-2 w-2 rounded-full ${STATUS_DOT[info.getValue()] ?? "bg-gray-300"}`}
         />
+        <span aria-hidden="true">{STATUS_ICON[info.getValue()] ?? "\u25cb"}</span>
         {info.getValue()}
       </span>
     ),
