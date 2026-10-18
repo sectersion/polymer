@@ -25,7 +25,7 @@ function Card({
   href: string;
   label: string;
   title?: string;
-  value: number;
+  value: React.ReactNode;
 }): React.JSX.Element {
   return (
     <Link
@@ -70,9 +70,9 @@ export default async function FleetPage(): Promise<React.JSX.Element> {
         />
         <Card
           href="/telemetry"
-          label="Cost (µUSD)"
-          title={`${formatUsd(summary.total_cost_micro_usd)} (${microUsdTooltip(summary.total_cost_micro_usd)})`}
-          value={summary.total_cost_micro_usd}
+          label="Cost"
+          title={microUsdTooltip(summary.total_cost_micro_usd)}
+          value={formatUsd(summary.total_cost_micro_usd)}
         />
       </div>
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">

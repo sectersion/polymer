@@ -6,7 +6,12 @@ import type {
   TaskItem,
   TimelineEventRow,
 } from "@/lib/polymer";
-import { formatUsd, microUsdTooltip, sparkPoints } from "./format";
+import {
+  donutSegments,
+  formatUsd,
+  microUsdTooltip,
+  sparkPoints,
+} from "./format";
 
 export function CostSparkline({
   buckets,
@@ -53,14 +58,10 @@ export function TaskDonut({ tasks }: { tasks: TaskItem[] }): React.JSX.Element {
   const counts = TASK_STATUSES.map(
     (s) => tasks.filter((t) => t.status === s).length,
   );
-  const total = counts.reduce((a, b) => a + b, 0);
-  let acc = 0;
-  const segs = counts.map((c, i) => {
-    const frac = total === 0 ? 0 : c / total;
-    const s = { frac, offset: acc, color: DONUT_COLORS[i]! };
-    acc += frac;
-    return s;
-  });
+  const segs = donutSegments(counts).map((s, i) => ({
+    ...s,
+    color: DONUT_COLORS[i]!,
+  }));
   return (
     <div
       className="rounded-lg border border-(--color-hairline) bg-(--color-card) p-5 shadow-sm"
@@ -170,7 +171,9 @@ export function RecentEvents({
       <div className="text-sm text-gray-500">Recent events</div>
       <ul className="mt-2 space-y-1 text-sm">
         {events.slice(0, 8).map((e) => (
-          <li key={e.usage_id}>
+          <li
+            key={`${e.usage_id}-${e.task_id ?? e.agent_id ?? "fleet"}-${e.recorded_at}`}
+          >
             {e.task_id ? (
               <Link href={`/tasks/${e.task_id}`} className="hover:underline">
                 {e.model ?? "event"} · {e.input_tokens ?? 0}+
