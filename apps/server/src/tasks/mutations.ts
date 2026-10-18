@@ -3,6 +3,7 @@ import { recordAudit } from "../identity/audit.js";
 import type { PolymerDatabase } from "../database/db.js";
 import {
   TASK_LEASE_DEFAULT_SECONDS,
+  catalogError,
   getTask,
   listTaskAssignees,
   requireActiveAgent,
@@ -669,4 +670,170 @@ export function adminTransferCoordinator(
     };
   });
   return write.immediate();
+}
+
+export interface BulkStatusItem {
+  task_id: string;
+  ok: boolean;
+  status?: TaskStatus;
+  version?: number;
+  error?: string;
+}
+/** Catalog code for a bulk item failure; never a raw message. */
+function bulkErrorCode(err: unknown): string {
+  if (
+    err instanceof Error &&
+    "code" in err &&
+    typeof (err as Error & { code: unknown }).code === "string"
+  ) {
+    return (err as Error & { code: string }).code;
+  }
+  return "invalid_request";
+}
+export function adminBulkUpdateStatus(
+  db: PolymerDatabase,
+  taskIds: string[],
+  actorSessionId: string,
+  status: TaskStatus,
+): { results: BulkStatusItem[] } {
+  const results: BulkStatusItem[] = [];
+  for (const taskId of [...new Set(taskIds)]) {
+    try {
+      // One transaction per item: the status write and its audit row
+      // commit atomically, so a crash between them cannot tear state.
+      // The generation bump is deliberate: a bulk admin write is a
+      // force-bypass epoch that invalidates in-flight agent writes.
+      const item = db.transaction(() => {
+        const task = getTask(db, taskId);
+        if (task === undefined) throw new TaskNotFoundError(taskId);
+        assertTaskTransition(task.status, status);
+        const before = auditSnapshot(task);
+        const version = task.version + 1;
+        const leaseGeneration = task.lease_generation + 1;
+        const now = new Date().toISOString();
+        const clearsLease = status === "done" || status === "failed";
+        const updated = db
+          .prepare(
+            "UPDATE tasks SET status = ?, version = ?, lease_expires_at = ?, lease_generation = ?, updated_at = ? WHERE task_id = ? AND version = ?",
+          )
+          .run(
+            status,
+            version,
+            clearsLease ? null : task.lease_expires_at,
+            leaseGeneration,
+            now,
+            task.task_id,
+            task.version,
+          );
+        if (updated.changes !== 1)
+          throw new TaskVersionMismatchError(task.task_id);
+        recordAudit(db, {
+          actor_type: "admin_session",
+          actor_id: actorSessionId,
+          action: "task.status.bypass",
+          task_id: task.task_id,
+          before,
+          after: auditSnapshot({
+            status,
+            coordinator: task.coordinator,
+            version,
+            lease_generation: leaseGeneration,
+            lease_expires_at: clearsLease ? null : task.lease_expires_at,
+          }),
+        });
+        return { task_id: taskId, ok: true as const, status, version };
+      })();
+      results.push(item);
+    } catch (err) {
+      results.push({
+        task_id: taskId,
+        ok: false,
+        error: bulkErrorCode(err),
+      });
+    }
+  }
+  return { results };
+}
+export interface BulkAssignItem {
+  task_id: string;
+  ok: boolean;
+  assigned_to?: string[];
+  version?: number;
+  error?: string;
+}
+export function adminBulkAssign(
+  db: PolymerDatabase,
+  taskIds: string[],
+  actorSessionId: string,
+  agentIds: string[],
+): { results: BulkAssignItem[] } {
+  const results: BulkAssignItem[] = [];
+  for (const taskId of [...new Set(taskIds)]) {
+    try {
+      // One transaction per item: inserts, version bump, and audit row
+      // commit atomically. The generation bump is deliberate: a bulk
+      // admin write is a force-bypass epoch that invalidates
+      // in-flight agent writes.
+      const item = db.transaction(() => {
+        const targets = [...new Set(agentIds)];
+        if (targets.length === 0) throw catalogError("invalid_request");
+        const task = getTask(db, taskId);
+        if (task === undefined) throw new TaskNotFoundError(taskId);
+        for (const agentId of targets) {
+          if (getAgentById(db, agentId) === undefined)
+            throw new TaskAgentNotFoundError(agentId);
+        }
+        const existing = listTaskAssignees(db, taskId);
+        for (const agentId of targets) {
+          if (existing.some((x) => x.agent_id === agentId))
+            throw new TaskAlreadyAssignedError(task.task_id, agentId);
+        }
+        const before = auditSnapshot(task);
+        const now = new Date().toISOString();
+        const insert = db.prepare(
+          "INSERT INTO task_assignments (task_id, agent_id, assigned_at) VALUES (?, ?, ?)",
+        );
+        for (const agentId of targets) insert.run(task.task_id, agentId, now);
+        const version = task.version + 1;
+        const leaseGeneration = task.lease_generation + 1;
+        const updated = db
+          .prepare(
+            "UPDATE tasks SET version = ?, lease_generation = ?, updated_at = ? WHERE task_id = ? AND version = ?",
+          )
+          .run(version, leaseGeneration, now, task.task_id, task.version);
+        if (updated.changes !== 1)
+          throw new TaskVersionMismatchError(task.task_id);
+        recordAudit(db, {
+          actor_type: "admin_session",
+          actor_id: actorSessionId,
+          action: "task.assign.bypass",
+          task_id: task.task_id,
+          before,
+          after: auditSnapshot({
+            status: task.status,
+            coordinator: task.coordinator,
+            version,
+            lease_generation: leaseGeneration,
+            lease_expires_at: task.lease_expires_at,
+          }),
+        });
+        return {
+          task_id: taskId,
+          ok: true,
+          assigned_to: listTaskAssignees(db, task.task_id).map(
+            (a) => a.agent_id,
+          ),
+          version,
+        };
+      })();
+      results.push(item);
+    } catch (err) {
+      results.push({
+        task_id: taskId,
+        ok: false,
+        error: bulkErrorCode(err),
+      });
+    }
+  }
+  return { results };
 }

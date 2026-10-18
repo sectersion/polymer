@@ -103,6 +103,10 @@ export function handleRestRequest(
           status: stringParam(url, "status"),
           createdBy: stringParam(url, "created_by"),
           assignedTo: stringParam(url, "assigned_to"),
+          coordinator: stringParam(url, "coordinator"),
+          q: stringParam(url, "q"),
+          orderBy: stringParam(url, "order_by"),
+          orderDir: stringParam(url, "order_dir"),
           limit: limitOf(url),
           cursor: stringParam(url, "cursor"),
         });

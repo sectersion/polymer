@@ -151,14 +151,24 @@ export interface ListTasksInput {
   status?: string;
   createdBy?: string;
   assignedTo?: string;
+  coordinator?: string;
+  q?: string;
+  orderBy?: string;
+  orderDir?: string;
   limit?: number;
+  cursor?: string;
 }
 
 /**
- * Component 10 (extended in 12): list tasks, newest last. `limit`
- * defaults to 50 and caps at 500 (mirrors the MCP/REST list
- * conventions). `assignedTo` filters to tasks holding an assignment
- * row for that agent.
+ * Component 10 (extended in 12): list tasks. `limit` defaults to 50
+ * and caps at 500 (mirrors the MCP/REST list conventions).
+ * `assignedTo` filters to tasks holding an assignment row for that
+ * agent. `coordinator` filters to the current owning agent. `q` is a
+ * case-insensitive substring match on `title`. `orderBy` is
+ * `created_at` (default) or `updated_at`; `orderDir` is `asc`
+ * (default) or `desc`. Ordering tie-breaks on rowid so pagination is
+ * stable. `cursor` pages forward from the last returned
+ * (order-key, rowid) tuple (see encodeTaskCursor).
  */
 export function listTasks(
   db: PolymerDatabase,
@@ -167,18 +177,37 @@ export function listTasks(
   if (input.status !== undefined && !isTaskStatus(input.status)) {
     throw new TaskInvalidStatusError(input.status);
   }
+  const order = normalizeOrder(input);
   const limit = input.limit ?? 50;
   if (!Number.isInteger(limit) || limit <= 0 || limit > 500) {
     throw new Error("limit must be an integer between 1 and 500");
   }
+  const desc = order.orderDir === "DESC";
+  const cursor =
+    input.cursor === undefined ? undefined : decodeTaskCursor(input.cursor);
   const where = taskWhere(input);
+  const joiner = where.sql.length > 0 ? " AND" : " WHERE";
+  const cursorSql =
+    cursor === undefined
+      ? ""
+      : taskCursorPredicate(desc).sql(joiner, order.orderBy);
+  const params: unknown[] =
+    cursor === undefined
+      ? [...where.params, limit]
+      : [
+          ...where.params,
+          cursor.orderValue,
+          cursor.orderValue,
+          cursor.rowid,
+          limit,
+        ];
   const rows = db
     .prepare(
       `SELECT ${TASK_COLUMNS} FROM tasks
-       ${where.sql}
-       ORDER BY created_at ASC, rowid ASC LIMIT ?`,
+       ${where.sql}${cursorSql}
+       ORDER BY ${order.orderBy} ${order.orderDir}, rowid ${order.orderDir} LIMIT ?`,
     )
-    .all(...where.params, limit) as Record<string, unknown>[];
+    .all(...params) as Record<string, unknown>[];
   return rows.map(toTask);
 }
 
@@ -230,10 +259,78 @@ export function catalogError(code: string): Error & { code: string } {
   return err;
 }
 
+/**
+ * Task-list cursor: the (order-key, rowid) tuple of the last returned
+ * row, base64url-encoded. A bare rowid is NOT a valid task cursor: with
+ * `orderBy=updated_at` the rowid alone can skip or duplicate rows when
+ * timestamps tie or interleave, so the order key travels with it.
+ * Legacy `c<rowid>` cursors are rejected as `invalid_cursor`.
+ */
+export function encodeTaskCursor(rowid: number, orderValue: string): string {
+  return Buffer.from(`t${rowid}:${orderValue}`, "utf8").toString("base64url");
+}
+
+/** Inverse of encodeTaskCursor; throws `invalid_cursor` on tampering. */
+export function decodeTaskCursor(cursor: string): {
+  rowid: number;
+  orderValue: string;
+} {
+  let raw = "";
+  try {
+    raw = Buffer.from(cursor, "base64url").toString("utf8");
+  } catch {
+    throw catalogError("invalid_cursor");
+  }
+  const match = /^t(\d+):([\s\S]*)$/.exec(raw);
+  if (match === null) throw catalogError("invalid_cursor");
+  const rowid = Number(match[1]);
+  if (!Number.isInteger(rowid) || rowid < 0) {
+    throw catalogError("invalid_cursor");
+  }
+  return { rowid, orderValue: match[2] as string };
+}
+
+/** Tuple-keyset predicate for stable forward paging under any order. */
+function taskCursorPredicate(desc: boolean): {
+  sql: (joiner: string, orderBy: string) => string;
+} {
+  return {
+    sql: (joiner: string, orderBy: string) =>
+      desc
+        ? `${joiner} (${orderBy} < ? OR (${orderBy} = ? AND rowid < ?))`
+        : `${joiner} (${orderBy} > ? OR (${orderBy} = ? AND rowid > ?))`,
+  };
+}
+
 export interface TaskFilters {
   status?: string;
   createdBy?: string;
   assignedTo?: string;
+  coordinator?: string;
+  q?: string;
+  orderBy?: string;
+  orderDir?: string;
+}
+
+/** Ordering for both list shapes; unknown values are invalid_request. */
+function normalizeOrder(input: { orderBy?: string; orderDir?: string }): {
+  orderBy: "created_at" | "updated_at";
+  orderDir: "ASC" | "DESC";
+} {
+  const orderBy = input.orderBy === undefined ? "created_at" : input.orderBy;
+  if (orderBy !== "created_at" && orderBy !== "updated_at") {
+    throw catalogError("invalid_request");
+  }
+  const dir = (input.orderDir ?? "asc").toLowerCase();
+  if (dir !== "asc" && dir !== "desc") {
+    throw catalogError("invalid_request");
+  }
+  return { orderBy, orderDir: dir === "desc" ? "DESC" : "ASC" };
+}
+
+/** Escape LIKE wildcards so `q` is always a literal substring match. */
+function escapeLike(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
 }
 
 /** Shared WHERE construction for both list shapes (MCP + REST). */
@@ -259,6 +356,14 @@ function taskWhere(input: TaskFilters): { sql: string; params: unknown[] } {
     );
     params.push(input.assignedTo);
   }
+  if (input.coordinator !== undefined) {
+    where.push("coordinator = ?");
+    params.push(input.coordinator);
+  }
+  if (input.q !== undefined) {
+    where.push("title LIKE ? ESCAPE '\\'");
+    params.push(`%${escapeLike(input.q)}%`);
+  }
   return {
     sql: where.length > 0 ? `WHERE ${where.join(" AND ")}` : "",
     params,
@@ -271,35 +376,59 @@ export interface ListTasksPageInput extends TaskFilters {
 }
 
 /**
- * Component 18: cursor-paginated task read for the REST surface (the
- * MCP tool keeps its limit-only contract — no cursor param there, by
- * design). Same ordering and limits as listTasks; `next_cursor` is
- * null once the collection is exhausted.
+ * Component 18: cursor-paginated task read. Shares the tuple-keyset
+ * cursor grammar and the filter/ordering surface with listTasks; MCP
+ * get_tasks mirrors this grammar (same `cursor` param, same
+ * `next_cursor` shape). `next_cursor` is null once exhausted. The
+ * cursor carries the last row's (order-key, rowid); rowid-only cursors
+ * from other surfaces are rejected as `invalid_cursor`.
  */
 export function listTasksPage(
   db: PolymerDatabase,
   input: ListTasksPageInput = {},
 ): { tasks: Task[]; next_cursor: string | null } {
+  if (input.status !== undefined && !isTaskStatus(input.status)) {
+    throw new TaskInvalidStatusError(input.status);
+  }
+  const order = normalizeOrder(input);
   const limit = input.limit ?? 50;
   if (!Number.isInteger(limit) || limit <= 0 || limit > 500) {
     throw new Error("limit must be an integer between 1 and 500");
   }
-  const cursorRowid =
-    input.cursor === undefined ? 0 : decodeCursor(input.cursor);
+  const desc = order.orderDir === "DESC";
+  const cursor =
+    input.cursor === undefined ? undefined : decodeTaskCursor(input.cursor);
   const where = taskWhere(input);
+  const joiner = where.sql.length > 0 ? " AND" : " WHERE";
+  const cursorSql =
+    cursor === undefined
+      ? ""
+      : taskCursorPredicate(desc).sql(joiner, order.orderBy);
+  const params: unknown[] =
+    cursor === undefined
+      ? [...where.params, limit + 1]
+      : [
+          ...where.params,
+          cursor.orderValue,
+          cursor.orderValue,
+          cursor.rowid,
+          limit + 1,
+        ];
   const rows = db
     .prepare(
       `SELECT rowid AS _rowid, ${TASK_COLUMNS} FROM tasks
-       ${where.sql}${where.sql.length > 0 ? " AND rowid > ?" : " WHERE rowid > ?"}
-       ORDER BY created_at ASC, rowid ASC LIMIT ?`,
+       ${where.sql}${cursorSql}
+       ORDER BY ${order.orderBy} ${order.orderDir}, rowid ${order.orderDir} LIMIT ?`,
     )
-    .all(...where.params, cursorRowid, limit + 1) as Array<
-    Record<string, unknown> & { _rowid: number }
-  >;
+    .all(...params) as Array<Record<string, unknown> & { _rowid: number }>;
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
+  const last = page[page.length - 1];
   return {
     tasks: page.map(toTask),
-    next_cursor: hasMore ? encodeCursor(page[page.length - 1]._rowid) : null,
+    next_cursor:
+      hasMore && last !== undefined
+        ? encodeTaskCursor(last._rowid, String(last[order.orderBy] as unknown))
+        : null,
   };
 }

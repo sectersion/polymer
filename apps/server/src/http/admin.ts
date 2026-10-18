@@ -23,12 +23,18 @@ import {
 } from "../identity/credentials.js";
 import { listAudit } from "../identity/audit.js";
 import { disableAgentSubtree } from "../identity/disable.js";
-import { AdminOpsLimiter, LoginLimiter, resolveRateLimitIp } from "../identity/rate-limit.js";
+import {
+  AdminOpsLimiter,
+  LoginLimiter,
+  resolveRateLimitIp,
+} from "../identity/rate-limit.js";
 import type { EventBus } from "./events.js";
 import {
   TASK_STATUSES,
   TASK_LEASE_DEFAULT_SECONDS,
   adminAssignTask,
+  adminBulkAssign,
+  adminBulkUpdateStatus,
   adminClaimTask,
   adminTransferCoordinator,
   adminUpdateTaskStatus,
@@ -148,7 +154,10 @@ export function isAdminPath(pathname: string, method: string): boolean {
     const rest = pathname.slice("/api/tasks/".length);
     const tail = rest.split("/").pop() ?? "";
     // Only MUTATION methods belong here; GET stays with the readers.
+    // Bulk close-out routes are single-segment POSTs under /api/tasks/.
     if (ADMIN_TASK_MUTATIONS.includes(tail) && method !== "GET") return true;
+    if ((rest === "bulk-status" || rest === "bulk-assign") && method === "POST")
+      return true;
     if (method === "PATCH") return true;
   }
   if (
@@ -278,7 +287,12 @@ export function handleAdminRequest(
       events.closeSocketsFor([auth.credentialId]);
       res.writeHead(200, {
         "content-type": "application/json",
-        "set-cookie": cookieSetCookieHeader("", 0, host, req.headers["x-forwarded-proto"]),
+        "set-cookie": cookieSetCookieHeader(
+          "",
+          0,
+          host,
+          req.headers["x-forwarded-proto"],
+        ),
       });
       res.end(JSON.stringify({ success: true }));
       return true;
@@ -499,6 +513,102 @@ export function handleAdminRequest(
     }
 
     // --- task mutations ---
+    // Bulk close-out: force-bypass per-item status/assign with audit rows.
+    if (pathname === "/api/tasks/bulk-status" && req.method === "POST") {
+      if (!requireCsrf(req, res, db, auth)) return true;
+      if (!ops.consume(auth.credentialId)) {
+        sendJson(res, 429, { error: "rate_limit_exceeded", retry_after: 60 });
+        return true;
+      }
+      void readBody(req, MAX_JSON_BODY_BYTES)
+        .then((result) => {
+          if (result.kind === "too-large") {
+            sendJson(
+              res,
+              413,
+              { error: "payload_too_large" },
+              { connection: "close" },
+            );
+            return;
+          }
+          const body = (result.kind === "parsed" ? result.value : {}) as Record<
+            string,
+            unknown
+          >;
+          const taskIds = body["task_ids"];
+          const status = body["status"];
+          if (
+            !Array.isArray(taskIds) ||
+            !taskIds.every((x) => typeof x === "string") ||
+            typeof status !== "string" ||
+            !(TASK_STATUSES as readonly string[]).includes(status)
+          ) {
+            invalidRequest(res);
+            return;
+          }
+          const out = adminBulkUpdateStatus(
+            db,
+            taskIds as string[],
+            auth.credentialId,
+            status as TaskStatus,
+          );
+          events.publish("task.updated", {
+            change: "bulk-status",
+            status,
+            count: out.results.filter((r) => r.ok).length,
+          });
+          sendJson(res, 200, out);
+        })
+        .catch((err: unknown) => mapServiceError(res, err));
+      return true;
+    }
+    if (pathname === "/api/tasks/bulk-assign" && req.method === "POST") {
+      if (!requireCsrf(req, res, db, auth)) return true;
+      if (!ops.consume(auth.credentialId)) {
+        sendJson(res, 429, { error: "rate_limit_exceeded", retry_after: 60 });
+        return true;
+      }
+      void readBody(req, MAX_JSON_BODY_BYTES)
+        .then((result) => {
+          if (result.kind === "too-large") {
+            sendJson(
+              res,
+              413,
+              { error: "payload_too_large" },
+              { connection: "close" },
+            );
+            return;
+          }
+          const body = (result.kind === "parsed" ? result.value : {}) as Record<
+            string,
+            unknown
+          >;
+          const taskIds = body["task_ids"];
+          const agentIds = body["agent_ids"];
+          if (
+            !Array.isArray(taskIds) ||
+            !taskIds.every((x) => typeof x === "string") ||
+            !Array.isArray(agentIds) ||
+            !agentIds.every((x) => typeof x === "string")
+          ) {
+            invalidRequest(res);
+            return;
+          }
+          const out = adminBulkAssign(
+            db,
+            taskIds as string[],
+            auth.credentialId,
+            agentIds as string[],
+          );
+          events.publish("task.updated", {
+            change: "bulk-assign",
+            count: out.results.filter((r) => r.ok).length,
+          });
+          sendJson(res, 200, out);
+        })
+        .catch((err: unknown) => mapServiceError(res, err));
+      return true;
+    }
     if (pathname.startsWith("/api/tasks/")) {
       const rest = pathname.slice("/api/tasks/".length);
       const segments = rest.split("/");
