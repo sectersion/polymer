@@ -3,15 +3,17 @@ import type { PolymerDatabase } from "../database/db.js";
 import { verifyAdminSession } from "../identity/credentials.js";
 import { mapServiceError, readAdminCookie, sendJson } from "./common.js";
 import {
+  getBreakdown,
   getCosts,
   getTelemetrySummary,
+  getTraceDetail,
   listAgentTelemetry,
   listTimeline,
 } from "../telemetry/queries.js";
 
 /**
  * Component 27: `GET /api/telemetry/*` (summary, agents, timeline,
- * costs). Read-only admin-session routes — session cookie alone, no
+ * costs, breakdown, traces/:trace_id). Read-only admin-session routes — session cookie alone, no
  * CSRF (the read-only contract from the auth table). Non-GET answers
  * 405, like the component-18 read surface.
  */
@@ -97,6 +99,27 @@ export function handleTelemetryRequest(
           to: param(url, "to"),
         }),
       );
+      return true;
+    }
+    if (url.pathname === "/api/telemetry/breakdown") {
+      sendJson(
+        res,
+        200,
+        getBreakdown(db, {
+          dimension: param(url, "dimension"),
+          from: param(url, "from"),
+          to: param(url, "to"),
+        }),
+      );
+      return true;
+    }
+    if (url.pathname.startsWith("/api/telemetry/traces/")) {
+      const traceId = url.pathname.slice("/api/telemetry/traces/".length);
+      if (traceId.length === 0 || traceId.includes("/")) {
+        sendJson(res, 404, { error: "not_found" });
+        return true;
+      }
+      sendJson(res, 200, getTraceDetail(db, traceId));
       return true;
     }
     sendJson(res, 404, { error: "not_found" });

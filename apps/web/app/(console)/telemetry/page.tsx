@@ -5,6 +5,7 @@ import {
   fetchTimeline,
 } from "@/lib/polymer";
 import { AgentTelemetryTable } from "./agent-telemetry-table";
+import { BreakdownBars } from "./breakdown-bars";
 
 function Card({ label, value }: { label: string; value: string }) {
   return (
@@ -74,6 +75,8 @@ export default async function TelemetryPage(): Promise<React.JSX.Element> {
         <AgentTelemetryTable rows={agents} />
       </div>
 
+      <BreakdownBars />
+
       <h2 className="mt-8 text-lg font-semibold">Latest usage</h2>
       <div className="mt-2 rounded-lg border border-(--color-hairline) bg-(--color-card) p-2 shadow-sm">
         <table className="w-full text-sm">
@@ -105,7 +108,16 @@ export default async function TelemetryPage(): Promise<React.JSX.Element> {
                   {event.reported_cost_micro_usd ?? "—"}
                 </td>
                 <td className="px-3 py-2 font-mono text-xs text-gray-500">
-                  {event.trace_id?.slice(0, 8) ?? "—"}
+                  {event.trace_id ? (
+                    <a
+                      href={`/telemetry/trace/${event.trace_id}`}
+                      className="underline"
+                    >
+                      {event.trace_id.slice(0, 8)}
+                    </a>
+                  ) : (
+                    "—"
+                  )}
                 </td>
               </tr>
             ))}
