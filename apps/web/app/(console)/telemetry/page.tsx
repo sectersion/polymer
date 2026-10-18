@@ -6,6 +6,8 @@ import {
 } from "@/lib/polymer";
 import { AgentTelemetryTable } from "./agent-telemetry-table";
 import { BreakdownBars } from "./breakdown-bars";
+import { EmptyState } from "../empty-state";
+import { UsageTable } from "./usage-table";
 
 function Card({ label, value }: { label: string; value: string }) {
   return (
@@ -49,25 +51,34 @@ export default async function TelemetryPage(): Promise<React.JSX.Element> {
 
       <h2 className="mt-8 text-lg font-semibold">Cost per day</h2>
       <div className="mt-2 rounded-lg border border-(--color-hairline) bg-(--color-card) p-5 shadow-sm">
-        {costs.map((bucket) => (
-          <div
-            key={bucket.bucket_start}
-            className="flex items-center gap-3 py-1"
-          >
-            <div className="w-28 shrink-0 font-mono text-xs text-gray-500">
-              {bucket.bucket_start.slice(0, 10)}
+        {costs.length === 0 ? (
+          <EmptyState
+            title="No costs recorded yet"
+            hint="Daily cost buckets appear here once usage is reported."
+          />
+        ) : (
+          costs.map((bucket) => (
+            <div
+              key={bucket.bucket_start}
+              className="flex items-center gap-3 py-1"
+            >
+              <div className="w-28 shrink-0 font-mono text-xs text-gray-500">
+                {bucket.bucket_start.slice(0, 10)}
+              </div>
+              <div className="h-4 flex-1 rounded bg-gray-100">
+                <div
+                  className="h-4 rounded bg-(--color-accent)"
+                  style={{
+                    width: `${(bucket.cost_micro_usd / peak) * 100}%`,
+                  }}
+                />
+              </div>
+              <div className="w-24 shrink-0 text-right text-sm tabular-nums">
+                {bucket.cost_micro_usd.toLocaleString("en-US")}
+              </div>
             </div>
-            <div className="h-4 flex-1 rounded bg-gray-100">
-              <div
-                className="h-4 rounded bg-(--color-accent)"
-                style={{ width: `${(bucket.cost_micro_usd / peak) * 100}%` }}
-              />
-            </div>
-            <div className="w-24 shrink-0 text-right text-sm tabular-nums">
-              {bucket.cost_micro_usd.toLocaleString("en-US")}
-            </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
 
       <h2 className="mt-8 text-lg font-semibold">Agents</h2>
@@ -79,50 +90,7 @@ export default async function TelemetryPage(): Promise<React.JSX.Element> {
 
       <h2 className="mt-8 text-lg font-semibold">Latest usage</h2>
       <div className="mt-2 rounded-lg border border-(--color-hairline) bg-(--color-card) p-2 shadow-sm">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-(--color-hairline) text-left">
-              <th className="px-3 py-2 font-medium text-gray-500">Recorded</th>
-              <th className="px-3 py-2 font-medium text-gray-500">Model</th>
-              <th className="px-3 py-2 font-medium text-gray-500">Tokens</th>
-              <th className="px-3 py-2 font-medium text-gray-500">
-                Cost (µUSD)
-              </th>
-              <th className="px-3 py-2 font-medium text-gray-500">Trace</th>
-            </tr>
-          </thead>
-          <tbody>
-            {events.map((event) => (
-              <tr
-                key={event.usage_id}
-                className="border-b border-(--color-hairline)"
-              >
-                <td className="px-3 py-2 font-mono text-xs text-gray-500">
-                  {event.recorded_at.slice(0, 19).replace("T", " ")}
-                </td>
-                <td className="px-3 py-2">{event.model ?? "—"}</td>
-                <td className="px-3 py-2 tabular-nums">
-                  {(event.input_tokens ?? 0) + (event.output_tokens ?? 0)}
-                </td>
-                <td className="px-3 py-2 tabular-nums">
-                  {event.reported_cost_micro_usd ?? "—"}
-                </td>
-                <td className="px-3 py-2 font-mono text-xs text-gray-500">
-                  {event.trace_id ? (
-                    <a
-                      href={`/telemetry/trace/${event.trace_id}`}
-                      className="underline"
-                    >
-                      {event.trace_id.slice(0, 8)}
-                    </a>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <UsageTable events={events} />
       </div>
     </div>
   );

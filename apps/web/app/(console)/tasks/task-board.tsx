@@ -56,9 +56,13 @@ function Column({
         {status} ({tasks.length})
       </h2>
       <div className="space-y-2">
-        {tasks.map((t) => (
-          <TaskCard key={t.task_id} task={t} />
-        ))}
+        {tasks.length === 0 ? (
+          <p className="rounded-md border border-dashed border-(--color-hairline) px-2 py-4 text-center text-xs text-gray-400">
+            No {status} tasks
+          </p>
+        ) : (
+          tasks.map((t) => <TaskCard key={t.task_id} task={t} />)
+        )}
       </div>
     </div>
   );
@@ -172,6 +176,12 @@ export function TaskBoard({
 
   return (
     <div>
+      {tasks.length === 0 && (
+        <p className="rounded-lg border border-dashed border-(--color-hairline) bg-(--color-card) p-10 text-center text-sm text-gray-500 shadow-sm">
+          No tasks yet — create one from the fleet dashboard or over MCP with
+          create_task.
+        </p>
+      )}
       <label className="flex items-center gap-2 text-sm">
         <input
           type="checkbox"
