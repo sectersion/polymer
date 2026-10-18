@@ -67,6 +67,45 @@ describe("task query: q, coordinator, ordering, cursor parity, bulk", () => {
     expect(p2.next_cursor).toBeNull();
   });
 
+  it("desc cursor walks every row exactly once (tuple keyset)", () => {
+    const { db } = setup();
+    // Force distinct updated_at values (creation ms can tie).
+    const stamps = [
+      "2026-01-01T00:00:01.000Z",
+      "2026-01-01T00:00:02.000Z",
+      "2026-01-01T00:00:03.000Z",
+    ];
+    const rows = listTasks(db, {});
+    rows.forEach((t, i) => {
+      db.prepare("UPDATE tasks SET updated_at = ? WHERE task_id = ?").run(
+        stamps[i % stamps.length],
+        t.task_id,
+      );
+    });
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 5; page++) {
+      const res = listTasksPage(db, {
+        orderBy: "updated_at",
+        orderDir: "desc",
+        limit: 1,
+        cursor,
+      });
+      if (res.tasks.length === 0) break;
+      seen.push(res.tasks[0].task_id);
+      if (res.next_cursor === null) break;
+      cursor = res.next_cursor;
+    }
+    // updated_at desc: newest stamp first, full coverage, no dupes/skips.
+    expect(seen).toEqual([rows[2].task_id, rows[1].task_id, rows[0].task_id]);
+    // A tampered/legacy rowid-only cursor is rejected, not mis-paged.
+    expect(() =>
+      listTasksPage(db, {
+        cursor: Buffer.from("c1", "utf8").toString("base64url"),
+      }),
+    ).toThrowError(/invalid_cursor/);
+  });
+
   it("admin bulk status closes out in_progress tasks with audit-safe errors", () => {
     const { db, t1, t2 } = setup();
     // move t1/t2 to in_progress via admin claim bypass

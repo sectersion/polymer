@@ -167,7 +167,8 @@ export interface ListTasksInput {
  * case-insensitive substring match on `title`. `orderBy` is
  * `created_at` (default) or `updated_at`; `orderDir` is `asc`
  * (default) or `desc`. Ordering tie-breaks on rowid so pagination is
- * stable. `cursor` pages forward from the last returned rowid.
+ * stable. `cursor` pages forward from the last returned
+ * (order-key, rowid) tuple (see encodeTaskCursor).
  */
 export function listTasks(
   db: PolymerDatabase,
@@ -182,20 +183,24 @@ export function listTasks(
     throw new Error("limit must be an integer between 1 and 500");
   }
   const desc = order.orderDir === "DESC";
-  const cursorRowid =
-    input.cursor === undefined ? undefined : decodeCursor(input.cursor);
+  const cursor =
+    input.cursor === undefined ? undefined : decodeTaskCursor(input.cursor);
   const where = taskWhere(input);
   const joiner = where.sql.length > 0 ? " AND" : " WHERE";
   const cursorSql =
-    cursorRowid === undefined
+    cursor === undefined
       ? ""
-      : desc
-        ? `${joiner} rowid < ?`
-        : `${joiner} rowid > ?`;
+      : taskCursorPredicate(desc).sql(joiner, order.orderBy);
   const params: unknown[] =
-    cursorRowid === undefined
+    cursor === undefined
       ? [...where.params, limit]
-      : [...where.params, cursorRowid, limit];
+      : [
+          ...where.params,
+          cursor.orderValue,
+          cursor.orderValue,
+          cursor.rowid,
+          limit,
+        ];
   const rows = db
     .prepare(
       `SELECT ${TASK_COLUMNS} FROM tasks
@@ -252,6 +257,49 @@ export function catalogError(code: string): Error & { code: string } {
   const err = new Error(code) as Error & { code: string };
   err.code = code;
   return err;
+}
+
+/**
+ * Task-list cursor: the (order-key, rowid) tuple of the last returned
+ * row, base64url-encoded. A bare rowid is NOT a valid task cursor: with
+ * `orderBy=updated_at` the rowid alone can skip or duplicate rows when
+ * timestamps tie or interleave, so the order key travels with it.
+ * Legacy `c<rowid>` cursors are rejected as `invalid_cursor`.
+ */
+export function encodeTaskCursor(rowid: number, orderValue: string): string {
+  return Buffer.from(`t${rowid}:${orderValue}`, "utf8").toString("base64url");
+}
+
+/** Inverse of encodeTaskCursor; throws `invalid_cursor` on tampering. */
+export function decodeTaskCursor(cursor: string): {
+  rowid: number;
+  orderValue: string;
+} {
+  let raw = "";
+  try {
+    raw = Buffer.from(cursor, "base64url").toString("utf8");
+  } catch {
+    throw catalogError("invalid_cursor");
+  }
+  const match = /^t(\d+):([\s\S]*)$/.exec(raw);
+  if (match === null) throw catalogError("invalid_cursor");
+  const rowid = Number(match[1]);
+  if (!Number.isInteger(rowid) || rowid < 0) {
+    throw catalogError("invalid_cursor");
+  }
+  return { rowid, orderValue: match[2] as string };
+}
+
+/** Tuple-keyset predicate for stable forward paging under any order. */
+function taskCursorPredicate(desc: boolean): {
+  sql: (joiner: string, orderBy: string) => string;
+} {
+  return {
+    sql: (joiner: string, orderBy: string) =>
+      desc
+        ? `${joiner} (${orderBy} < ? OR (${orderBy} = ? AND rowid < ?))`
+        : `${joiner} (${orderBy} > ? OR (${orderBy} = ? AND rowid > ?))`,
+  };
 }
 
 export interface TaskFilters {
@@ -328,10 +376,12 @@ export interface ListTasksPageInput extends TaskFilters {
 }
 
 /**
- * Component 18: cursor-paginated task read. Shares the rowid cursor
- * grammar and the filter/ordering surface with listTasks; MCP
+ * Component 18: cursor-paginated task read. Shares the tuple-keyset
+ * cursor grammar and the filter/ordering surface with listTasks; MCP
  * get_tasks mirrors this grammar (same `cursor` param, same
- * `next_cursor` shape). `next_cursor` is null once exhausted.
+ * `next_cursor` shape). `next_cursor` is null once exhausted. The
+ * cursor carries the last row's (order-key, rowid); rowid-only cursors
+ * from other surfaces are rejected as `invalid_cursor`.
  */
 export function listTasksPage(
   db: PolymerDatabase,
@@ -346,20 +396,24 @@ export function listTasksPage(
     throw new Error("limit must be an integer between 1 and 500");
   }
   const desc = order.orderDir === "DESC";
-  const cursorRowid =
-    input.cursor === undefined ? undefined : decodeCursor(input.cursor);
+  const cursor =
+    input.cursor === undefined ? undefined : decodeTaskCursor(input.cursor);
   const where = taskWhere(input);
   const joiner = where.sql.length > 0 ? " AND" : " WHERE";
   const cursorSql =
-    cursorRowid === undefined
+    cursor === undefined
       ? ""
-      : desc
-        ? `${joiner} rowid < ?`
-        : `${joiner} rowid > ?`;
+      : taskCursorPredicate(desc).sql(joiner, order.orderBy);
   const params: unknown[] =
-    cursorRowid === undefined
+    cursor === undefined
       ? [...where.params, limit + 1]
-      : [...where.params, cursorRowid, limit + 1];
+      : [
+          ...where.params,
+          cursor.orderValue,
+          cursor.orderValue,
+          cursor.rowid,
+          limit + 1,
+        ];
   const rows = db
     .prepare(
       `SELECT rowid AS _rowid, ${TASK_COLUMNS} FROM tasks
@@ -369,8 +423,12 @@ export function listTasksPage(
     .all(...params) as Array<Record<string, unknown> & { _rowid: number }>;
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
+  const last = page[page.length - 1];
   return {
     tasks: page.map(toTask),
-    next_cursor: hasMore ? encodeCursor(page[page.length - 1]._rowid) : null,
+    next_cursor:
+      hasMore && last !== undefined
+        ? encodeTaskCursor(last._rowid, String(last[order.orderBy] as unknown))
+        : null,
   };
 }
