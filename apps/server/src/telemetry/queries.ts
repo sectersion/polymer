@@ -1,5 +1,6 @@
 import type { PolymerDatabase } from "../database/db.js";
 import { catalogError } from "../tasks/store.js";
+import { listSpansByTrace, type StoredSpan } from "./spans.js";
 
 /**
  * Component 27: fleet telemetry reads. Pure service layer — the HTTP
@@ -352,4 +353,106 @@ function floorUtc(ms: number, granularity: CostGranularity): number {
     );
   }
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+export type BreakdownDimension = "model" | "provider";
+
+export interface BreakdownInput {
+  dimension: string | undefined;
+  from?: string;
+  to?: string;
+}
+
+export interface BreakdownBucket {
+  key: string;
+  tokens_used: number;
+  cost_micro_usd: number;
+  spans: number;
+}
+
+/**
+ * Per-model/per-provider totals over the same ISO-8601 UTC window
+ * semantics as getCosts (from-inclusive, to-exclusive, default last
+ * 24h, max 31d). NULL dimension values fold into "unknown" so every
+ * usage row is counted exactly once. Ordered by cost descending.
+ */
+export function getBreakdown(
+  db: PolymerDatabase,
+  input: BreakdownInput,
+): { dimension: BreakdownDimension; buckets: BreakdownBucket[] } {
+  if (input.dimension !== "model" && input.dimension !== "provider") {
+    fail("invalid_request");
+  }
+  const dimension = input.dimension as BreakdownDimension;
+  const range = parseTimeRange(input.from, input.to);
+  const column = dimension === "model" ? "model" : "provider";
+  const rows = db
+    .prepare(
+      `SELECT COALESCE(${column}, 'unknown') AS key,
+              COALESCE(SUM(input_tokens), 0)
+                + COALESCE(SUM(output_tokens), 0) AS tokens,
+              COALESCE(SUM(reported_cost_micro_usd), 0) AS cost,
+              COUNT(*) AS spans
+         FROM usage_records
+        WHERE recorded_at >= ? AND recorded_at < ?
+        GROUP BY key ORDER BY cost DESC, key ASC`,
+    )
+    .all(range.from, range.to) as Array<{
+    key: string;
+    tokens: number | bigint;
+    cost: number | bigint;
+    spans: number | bigint;
+  }>;
+  return {
+    dimension,
+    buckets: rows.map((r) => ({
+      key: r.key,
+      tokens_used: num(r.tokens) ?? 0,
+      cost_micro_usd: num(r.cost) ?? 0,
+      spans: num(r.spans) ?? 0,
+    })),
+  };
+}
+
+const TRACE_ID_RE = /^[0-9a-f]{32}$/;
+
+export interface TraceSpanView {
+  span_id: string;
+  parent_span_id: string | null;
+  name: string;
+  start_time_unix_ns: string;
+  end_time_unix_ns: string;
+  error: boolean;
+  status_message: string | null;
+  agent_id: string;
+}
+
+/**
+ * Read-only trace detail: every stored span of one trace ordered by
+ * start time (listSpansByTrace), with error highlighting data derived
+ * from the OTel status code (2 = ERROR). Unknown traces are
+ * `not_found`, malformed ids `invalid_request`.
+ */
+export function getTraceDetail(
+  db: PolymerDatabase,
+  traceId: string,
+): { trace_id: string; spans: TraceSpanView[] } {
+  if (!TRACE_ID_RE.test(traceId)) fail("invalid_request");
+  const spans: StoredSpan[] = listSpansByTrace(db, traceId);
+  if (spans.length === 0) {
+    throw catalogError("not_found");
+  }
+  return {
+    trace_id: traceId,
+    spans: spans.map((s) => ({
+      span_id: s.spanId,
+      parent_span_id: s.parentSpanId,
+      name: s.name,
+      start_time_unix_ns: s.startTimeUnixNano,
+      end_time_unix_ns: s.endTimeUnixNano,
+      error: s.statusCode === 2,
+      status_message: s.statusMessage,
+      agent_id: s.agentId,
+    })),
+  };
 }

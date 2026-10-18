@@ -179,3 +179,42 @@ export async function fetchTokens(): Promise<TokenRow[]> {
   const body = await backendGet<{ tokens: TokenRow[] }>("/api/tokens");
   return body.tokens;
 }
+
+export interface BreakdownBucketRow {
+  key: string;
+  tokens_used: number;
+  cost_micro_usd: number;
+  spans: number;
+}
+
+/** Telemetry depth: per-model/per-provider totals for stacked bars. */
+export async function fetchBreakdown(
+  dimension: "model" | "provider",
+): Promise<BreakdownBucketRow[]> {
+  const body = await backendGet<{
+    dimension: string;
+    buckets: BreakdownBucketRow[];
+  }>(`/api/telemetry/breakdown?dimension=${dimension}`);
+  return body.buckets;
+}
+
+export interface TraceSpanRow {
+  span_id: string;
+  parent_span_id: string | null;
+  name: string;
+  start_time_unix_ns: string;
+  end_time_unix_ns: string;
+  error: boolean;
+  status_message: string | null;
+  agent_id: string;
+}
+
+/** Telemetry depth: spans of one trace, oldest first. */
+export async function fetchTraceSpans(
+  traceId: string,
+): Promise<TraceSpanRow[]> {
+  const body = await backendGet<{ trace_id: string; spans: TraceSpanRow[] }>(
+    `/api/telemetry/traces/${traceId}`,
+  );
+  return body.spans;
+}
