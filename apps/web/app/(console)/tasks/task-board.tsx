@@ -10,7 +10,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { TaskItem } from "@/lib/polymer";
-import { ToastStack, pushToast } from "@/lib/toasts";
+import { pushToast } from "@/lib/toasts";
 
 const COLUMNS = ["to_do", "in_progress", "done", "failed"] as const;
 
@@ -79,33 +79,50 @@ export function TaskBoard({
   const [force, setForce] = useState(false);
   const [tasks, setTasks] = useState(initial);
 
-  async function revertMove(previous: TaskItem): Promise<void> {
-    await fetch(`/api/tasks/${previous.task_id}`, {
+  async function revertMove(
+    taskId: string,
+    status: string,
+    expectedVersion: number,
+    leaseGeneration: number,
+  ): Promise<void> {
+    const res = await fetch(`/api/tasks/${taskId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        status: previous.status,
-        expected_version: previous.version,
-        lease_generation: previous.lease_generation,
+        status,
+        expected_version: expectedVersion,
+        lease_generation: leaseGeneration,
       }),
     });
+    const body = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      version?: number;
+    };
+    if (!res.ok) {
+      pushToast({
+        kind: "error",
+        message: `Undo rejected (${body.error ?? res.status}).`,
+      });
+      return;
+    }
     setTasks((prev) =>
-      prev.map((t) => (t.task_id === previous.task_id ? previous : t)),
+      prev.map((t) =>
+        t.task_id === taskId
+          ? { ...t, status, version: body.version ?? expectedVersion }
+          : t,
+      ),
     );
+    pushToast({ kind: "success", message: `Undone (v${body.version}).` });
     router.refresh();
   }
 
-  async function onDragEnd(event: DragEndEvent): Promise<void> {
-    const { active, over } = event;
-    if (over === null || over.id === active.id) return;
-    const task = tasks.find((t) => t.task_id === active.id);
-    if (task === undefined || task.status === over.id) return;
-    const previous = { ...task };
+  async function moveTask(task: TaskItem, status: string): Promise<void> {
+    const previousStatus = task.status;
     const res = await fetch(`/api/tasks/${task.task_id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        status: over.id,
+        status,
         expected_version: task.version,
         lease_generation: task.lease_generation,
         force,
@@ -118,30 +135,39 @@ export function TaskBoard({
     if (!res.ok) {
       pushToast({
         kind: "error",
-        message: `Drop rejected (${body.error ?? res.status}). No change applied.`,
+        message: `Move rejected (${body.error ?? res.status}). No change applied.`,
       });
       return;
     }
+    // Thread the post-move version into the undo closure: the snapshot
+    // taken before the move is already superseded and would 409.
+    const next = { ...task, status, version: body.version ?? task.version };
     setTasks((prev) =>
-      prev.map((t) =>
-        t.task_id === task.task_id
-          ? {
-              ...t,
-              status: String(over.id),
-              version: body.version ?? t.version,
-            }
-          : t,
-      ),
+      prev.map((t) => (t.task_id === task.task_id ? next : t)),
     );
     pushToast({
       kind: "success",
       message: force
         ? `Moved with force — lease bypass, audit-logged (v${body.version}).`
-        : `Moved to ${over.id} (v${body.version}).`,
+        : `Moved to ${status} (v${body.version}).`,
       actionLabel: "Undo",
-      onAction: () => void revertMove(previous),
+      onAction: () =>
+        void revertMove(
+          task.task_id,
+          previousStatus,
+          next.version,
+          task.lease_generation,
+        ),
     });
     router.refresh();
+  }
+
+  async function onDragEnd(event: DragEndEvent): Promise<void> {
+    const { active, over } = event;
+    if (over === null || over.id === active.id) return;
+    const task = tasks.find((t) => t.task_id === active.id);
+    if (task === undefined || task.status === over.id) return;
+    await moveTask(task, String(over.id));
   }
 
   return (
@@ -154,7 +180,6 @@ export function TaskBoard({
         />
         Force drop (lease-bypassing, audit-logged)
       </label>
-      <ToastStack />
       <DndContext onDragEnd={(e) => void onDragEnd(e)}>
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-4">
           {COLUMNS.map((status) => (

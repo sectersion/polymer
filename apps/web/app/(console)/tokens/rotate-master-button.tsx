@@ -3,11 +3,12 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ToastStack, pushToast } from "@/lib/toasts";
+import { pushToast } from "@/lib/toasts";
 
 export function RotateMasterButton(): React.JSX.Element {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [revealed, setRevealed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function rotate(): Promise<void> {
@@ -19,17 +20,15 @@ export function RotateMasterButton(): React.JSX.Element {
     setBusy(false);
     if (res.ok && typeof body.master_credential === "string") {
       // Shown exactly once, never stored.
+      setRevealed(body.master_credential);
       pushToast({
         kind: "success",
-        message: "New master credential (save it now — never shown again).",
+        message: "Master credential rotated — copy the new one now.",
         copyText: body.master_credential,
         durationMs: 30000,
       });
     } else {
-      pushToast({
-        kind: "error",
-        message: "Rotate failed — see server logs.",
-      });
+      pushToast({ kind: "error", message: "Rotation failed — try again." });
     }
     setOpen(false);
     router.refresh();
@@ -77,7 +76,12 @@ export function RotateMasterButton(): React.JSX.Element {
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
-      <ToastStack />
+      {revealed !== null && (
+        <p className="mt-2 rounded-md border border-red-300 bg-red-50 p-3 font-mono text-xs break-all">
+          New master credential (save it now — it is never shown again):{" "}
+          {revealed}
+        </p>
+      )}
     </div>
   );
 }
