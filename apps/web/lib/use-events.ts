@@ -9,6 +9,12 @@ export interface UseEventsOptions {
   apiUrl?: string;
   /** Milliseconds between poll refreshes when the socket is down. */
   pollMs?: number;
+  /**
+   * Coalescing window in milliseconds. Rapid `/api/events` pushes
+   * inside one window produce a single `onEvent` call (the most
+   * recent type wins) instead of one refresh per frame.
+   */
+  coalesceMs?: number;
 }
 
 /**
@@ -31,15 +37,39 @@ export function useEvents(
   onPoll: () => void,
   options: UseEventsOptions = {},
 ): EventsStatus {
-  const { apiUrl = "", pollMs = 30000 } = options;
+  const { apiUrl = "", pollMs = 30000, coalesceMs = 1000 } = options;
   const [status, setStatus] = useState<EventsStatus>("reconnecting");
   const cursor = useRef<string | undefined>(undefined);
   const handlers = useRef({ onEvent, onPoll });
   handlers.current = { onEvent, onPoll };
+  const pending = useRef<string | undefined>(undefined);
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
 
   useEffect(() => {
     let socket: WebSocket | undefined;
     let closed = false;
+
+    function flush(): void {
+      flushTimer.current = undefined;
+      if (closed) {
+        pending.current = undefined;
+        return;
+      }
+      const type = pending.current;
+      pending.current = undefined;
+      if (type !== undefined) handlers.current.onEvent(type);
+    }
+
+    function pushEvent(type: string): void {
+      // Coalesce rapid pushes into one refresh per window; the most
+      // recent type wins since a refresh revalidates all live data.
+      pending.current = type;
+      if (flushTimer.current === undefined) {
+        flushTimer.current = setTimeout(flush, coalesceMs);
+      }
+    }
 
     async function connect(): Promise<void> {
       if (closed) return;
@@ -78,7 +108,7 @@ export function useEvents(
             cursor.current = String(event.event_id);
           }
           if (typeof event.type === "string") {
-            handlers.current.onEvent(event.type);
+            pushEvent(event.type);
           }
         } catch {
           // Malformed frame: ignore, the poll backstop covers us.
@@ -105,9 +135,11 @@ export function useEvents(
     return () => {
       closed = true;
       clearInterval(pollTimer);
+      if (flushTimer.current !== undefined) clearTimeout(flushTimer.current);
+      pending.current = undefined;
       socket?.close();
     };
-  }, [apiUrl, pollMs]);
+  }, [apiUrl, pollMs, coalesceMs]);
 
   return status;
 }
