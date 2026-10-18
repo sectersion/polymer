@@ -25,7 +25,7 @@ export default function ConsoleLayout({
       >
         Skip to main content
       </a>
-      <header className="sticky top-0 z-10 border-b border-(--color-hairline) bg-white/80 backdrop-blur-md">
+      <header className="chrome-bar sticky top-0 z-10 border-b border-(--color-hairline) bg-(--color-card)/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center gap-6 px-4 py-3">
           <Link
             href="/"

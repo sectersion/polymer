@@ -56,9 +56,16 @@ export default async function FleetPage(): Promise<React.JSX.Element> {
       fetchAgentTelemetry(),
     ]);
   const active = tasks.filter((t) => t.status === "in_progress").length;
+  const renderedAt = new Date().toISOString();
   return (
     <div>
-      <h1 className="text-2xl font-semibold tracking-tight">Fleet</h1>
+      <h1 className="page-title">Fleet</h1>
+      <p className="page-subtitle">
+        Live overview · rendered{" "}
+        <time dateTime={renderedAt} title={renderedAt}>
+          {new Date(renderedAt).toLocaleString()}
+        </time>
+      </p>
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         <Card href="/agents" label="Agents" value={agents.length} />
         <Card href="/tasks" label="Tasks" value={tasks.length} />
