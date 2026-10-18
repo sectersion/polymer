@@ -5,5 +5,5 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await params;
-  return proxyMutation(`/api/agents/${id}/disable`);
+  return proxyMutation(req, `/api/agents/${id}/disable`);
 }

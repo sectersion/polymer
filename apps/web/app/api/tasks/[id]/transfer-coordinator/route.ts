@@ -6,7 +6,7 @@ export async function POST(
 ): Promise<Response> {
   const { id } = await params;
   const body = (await req.json().catch(() => null)) as unknown;
-  return proxyMutation(`/api/tasks/${id}/transfer-coordinator`, {
+  return proxyMutation(req, `/api/tasks/${id}/transfer-coordinator`, {
     body,
   });
 }

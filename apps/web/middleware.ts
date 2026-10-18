@@ -36,9 +36,11 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   }
   if (res.status === 401) {
     const redirect = NextResponse.redirect(new URL("/login", req.url));
-    // Drop the dead credential on the way out (both variants).
-    redirect.cookies.delete(ADMIN_COOKIE);
-    redirect.cookies.delete(ADMIN_COOKIE_HTTP);
+    // Drop the dead credential on the way out (both variants, same path
+    // the backend set or the proxy relayed so the browser actually drops
+    // the cookie rather than keeping a scoped twin).
+    redirect.cookies.delete({ name: ADMIN_COOKIE, path: "/" });
+    redirect.cookies.delete({ name: ADMIN_COOKIE_HTTP, path: "/" });
     return redirect;
   }
   return NextResponse.next();

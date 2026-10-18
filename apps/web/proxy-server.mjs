@@ -35,20 +35,47 @@ function sessionTokenFromCookie(header) {
     if (eq === -1) continue;
     const name = pair.slice(0, eq).trim();
     if (name === "__Host-polymer_admin" || name === "polymer_admin") {
-      return pair.slice(eq + 1).trim();
+      const value = pair.slice(eq + 1).trim();
+      // Session tokens are `<publicId>.<secret>` (hex-heavy); never
+      // interpolate arbitrary cookie bytes into the raw upstream request
+      // — a crafted value could inject headers over this raw socket.
+      if (/^[A-Za-z0-9._-]{8,256}$/.test(value)) return value;
+      return undefined;
     }
   }
   return undefined;
 }
 
+// Headers forwarded to the backend on the events upgrade. Explicit
+// allowlist: never replay authorization, forwarded-for/proto, or CSRF
+// material from the browser; the session cookie is translated separately.
+const EVENTS_ALLOW_HEADERS = new Set([
+  "host",
+  "origin",
+  "user-agent",
+  "accept-language",
+  "accept-encoding",
+  "sec-websocket-key",
+  "sec-websocket-version",
+  "sec-websocket-extensions",
+  "sec-websocket-protocol",
+]);
+
 /** Forward an /api/events upgrade to the backend with backend credentials. */
 function proxyEventsUpgrade(req, socket, head) {
   const token = sessionTokenFromCookie(req.headers.cookie);
+  if (token === undefined) {
+    try {
+      socket.destroy();
+    } catch {
+      // Already gone; nothing to close.
+    }
+    return;
+  }
   const upstream = connect(BACKEND_PORT, BACKEND_HOST, () => {
     const lines = [`GET ${req.url} HTTP/1.1`];
     for (const [name, value] of Object.entries(req.headers)) {
-      if (name === "cookie") continue;
-      if (name === "connection" || name === "upgrade") continue;
+      if (!EVENTS_ALLOW_HEADERS.has(name)) continue;
       if (Array.isArray(value)) {
         for (const v of value) lines.push(`${name}: ${v}`);
       } else if (value !== undefined) {
@@ -57,28 +84,31 @@ function proxyEventsUpgrade(req, socket, head) {
     }
     // The browser's Host header passes through untouched, so the
     // backend same-origin check (Origin host === Host) still passes.
-    if (token !== undefined) {
-      lines.push(`Cookie: __Host-polymer_admin=${token}`);
-    }
+    lines.push(`Cookie: __Host-polymer_admin=${token}`);
     lines.push("Connection: Upgrade", "Upgrade: websocket", "", "");
     upstream.write(lines.join("\r\n"));
     if (head.length > 0) upstream.write(head);
     socket.pipe(upstream).pipe(socket);
   });
-  const destroy = () => {
+  upstream.on("error", () => {
     try {
       socket.destroy();
     } catch {
-      // Socket already gone; upstream cleanup below covers the rest.
+      // Client already gone; nothing left to close.
     }
     try {
       upstream.destroy();
     } catch {
       // Upstream already gone; nothing left to close.
     }
-  };
-  upstream.on("error", destroy);
-  socket.on("error", destroy);
+  });
+  socket.on("error", () => {
+    try {
+      upstream.destroy();
+    } catch {
+      // Upstream already gone; nothing left to close.
+    }
+  });
 }
 
 /** Reverse-proxy plain HTTP (and non-events upgrades) to the Next server. */
