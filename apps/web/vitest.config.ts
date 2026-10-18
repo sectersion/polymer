@@ -5,6 +5,13 @@ import { defineConfig } from "vitest/config";
 const WEB_DIR = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  resolve: {
+    // Mirror tsconfig `paths: { "@/*": ["./*"] }`: component modules
+    // import via `@/…`, and unit tests import those components directly
+    // (jsdom), so vitest must resolve the same alias — otherwise the
+    // first component test fails with "Failed to resolve import".
+    alias: { "@": WEB_DIR },
+  },
   test: {
     // One hermetic production build per test run, shared by every
     // test file: concurrent `next build`s in one directory corrupt
