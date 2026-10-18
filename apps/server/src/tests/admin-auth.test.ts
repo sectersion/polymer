@@ -684,6 +684,10 @@ describe("administrator authentication (component 19)", () => {
       const mintedBody = await jsonBody(minted);
       expect(typeof mintedBody["init_token"]).toBe("string");
       expect(mintedBody["expires_in"]).toBe(600);
+      // Additive combined line carries the same split OTP fields.
+      expect(mintedBody["onboarding_token"]).toBe(
+        `${mintedBody["init_token_id"]}:${mintedBody["init_token"]}`,
+      );
 
       // The OTP registers a real agent over MCP.
       const bootstrap = new Client({ name: "bootstrap", version: "0.0.0" });
