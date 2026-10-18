@@ -23,7 +23,11 @@ checks the daemon; `polymer-setup --stop` ends it.
 Manual enrollment (against an already-running server):
 
 1. Get a one-time init OTP out of band (admin onboarding page).
-   Read the `POLYMER_SERVER` value off the same page.
+   Read the `POLYMER_SERVER` value off the same page. The page shows
+   one copyable prompt block with the server URL plus the minted
+   OTPs; `POST /api/tokens/init` also returns them combined as a
+   single-line `onboarding_token` (`<id>:<code>`) alongside the
+   split `init_token_id` / `init_token` fields.
 2. Run the installer — OTP in, `.polymrc` out:
 
 ```sh

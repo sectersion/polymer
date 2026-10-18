@@ -421,6 +421,9 @@ export function handleAdminRequest(
           sendJson(res, 200, {
             init_token_id: credential.credential_id,
             init_token: secret,
+            // Additive convenience: the same OTP as one copyable line
+            // (`<id>:<code>`). The split fields stay authoritative.
+            onboarding_token: `${credential.credential_id}:${secret}`,
             expires_in: INIT_TOKEN_DEFAULT_TTL_SECONDS,
             expires_at: credential.expires_at,
           });
