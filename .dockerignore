@@ -1,8 +1,8 @@
-node_modules
-.next
-dist
-.turbo
-coverage
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+**/coverage
 .git
 tmp
 *.db

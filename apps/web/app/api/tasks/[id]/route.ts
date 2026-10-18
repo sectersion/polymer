@@ -6,5 +6,5 @@ export async function PATCH(
 ): Promise<Response> {
   const { id } = await params;
   const body = (await req.json().catch(() => null)) as unknown;
-  return proxyMutation(`/api/tasks/${id}`, { method: "PATCH", body });
+  return proxyMutation(req, `/api/tasks/${id}`, { method: "PATCH", body });
 }

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { apiUrl } from "@/lib/polymer";
+import { browserIsSecure, relaySetCookie } from "@/lib/proxy";
 
 /**
  * Component 20: login proxy. Forwards the master credential to the
@@ -17,7 +18,6 @@ export async function POST(req: NextRequest): Promise<Response> {
   });
   const text = await res.text();
   const headers = new Headers({ "content-type": "application/json" });
-  const setCookie = res.headers.get("set-cookie");
-  if (setCookie !== null) headers.set("set-cookie", setCookie);
+  relaySetCookie(headers, res, browserIsSecure(req));
   return new Response(text, { status: res.status, headers });
 }

@@ -34,6 +34,10 @@ services:
     image: ghcr.io/sectersion/polymer-web:latest
     environment:
       POLYMER_API_URL: http://server:8080
+      # Set to "true" only when this service sits behind a known
+      # TLS-terminating proxy that sets X-Forwarded-Proto; otherwise the
+      # header is ignored (untrusted clients must not be able to force a
+      # cookie downgrade or a broken Secure cookie over plain HTTP).
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
