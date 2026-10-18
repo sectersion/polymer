@@ -1,16 +1,11 @@
 import Link from "next/link";
 import { ToastStack } from "@/lib/toasts";
+import { ConsoleNav } from "./console-nav";
 import { LogoutButton } from "./logout-button";
 import { ThemeToggle } from "./theme-toggle";
 
-const NAV = [
-  { href: "/", label: "Fleet" },
-  { href: "/agents", label: "Agents" },
-  { href: "/tasks", label: "Tasks" },
-  { href: "/telemetry", label: "Telemetry" },
-  { href: "/tokens", label: "Tokens" },
-  { href: "/onboarding", label: "Onboarding" },
-];
+const FOCUS_RING =
+  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--color-accent)";
 
 /**
  * Component 20: the console chrome. Sticky translucent header +
@@ -24,29 +19,30 @@ export default function ConsoleLayout({
 }) {
   return (
     <div className="min-h-screen">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-20 focus:bg-white focus:px-3 focus:py-2"
+      >
+        Skip to main content
+      </a>
       <header className="sticky top-0 z-10 border-b border-(--color-hairline) bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center gap-6 px-4 py-3">
-          <Link href="/" className="text-lg font-semibold tracking-tight">
+          <Link
+            href="/"
+            className={`text-lg font-semibold tracking-tight ${FOCUS_RING}`}
+          >
             Polymer
           </Link>
-          <nav className="flex gap-4 text-sm">
-            {NAV.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="text-gray-600 hover:text-(--color-accent)"
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
+          <ConsoleNav />
           <div className="ml-auto flex items-center gap-2">
             <ThemeToggle />
             <LogoutButton />
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+      <main id="main-content" className="mx-auto max-w-6xl px-4 py-6">
+        {children}
+      </main>
       {/* Single shared toast mount for the whole console: individual
           buttons only push, never mount their own stack. */}
       <ToastStack />
