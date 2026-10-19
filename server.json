@@ -1,0 +1,27 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
+  "name": "io.github.sectersion/polymer",
+  "title": "Polymer",
+  "description": "Fleet coordination and observability for autonomous coding agents. A shared task board with transactional leases and fencing (claim, don't wait), @mention handoffs, and OpenTelemetry-native telemetry with server-side per-agent/per-task cost attribution. Self-hosted: Node/TS MCP server (Streamable HTTP), REST API, SQLite, and a Next.js admin console.",
+  "version": "0.1.0",
+  "websiteUrl": "https://vaultless.dev",
+  "repository": {
+    "url": "https://github.com/sectersion/polymer",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/sectersion/polymer-server",
+      "version": "0.1.0",
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://localhost:8080/mcp"
+      }
+    }
+  ],
+  "publisher_provided_metadata": {
+    "publication_date": "2026-10-19",
+    "contact_email": "sectersion@users.noreply.github.com"
+  }
+}
