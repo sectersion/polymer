@@ -69,7 +69,28 @@ async function main() {
     console.error(`polymer-refresh: rotation refused (${code})`);
     process.exit(1);
   }
-  const rotated = await res.json();
+  let rotated;
+  try {
+    rotated = await res.json();
+  } catch {
+    console.error(
+      "polymer-refresh: rotation accepted but the response was unreadable — " +
+        "the old credentials are dead; re-enroll with a fresh OTP",
+    );
+    process.exit(1);
+  }
+  if (
+    typeof rotated.session_token !== "string" ||
+    rotated.session_token === "" ||
+    typeof rotated.reconnect_secret !== "string" ||
+    rotated.reconnect_secret === ""
+  ) {
+    console.error(
+      "polymer-refresh: rotation accepted but the response lacks new " +
+        "credentials — old .polymrc left untouched; re-enroll with a fresh OTP",
+    );
+    process.exit(1);
+  }
   const next = {
     ...rc,
     agent_id: rotated.agent_id ?? rc.agent_id,
