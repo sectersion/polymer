@@ -4,9 +4,9 @@ import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 
 const OPTIONS = [
-  { value: "light", label: "Light", icon: "ΓÿÇ" },
-  { value: "dark", label: "Dark", icon: "Γÿ╛" },
-  { value: "system", label: "System", icon: "ΓùÉ" },
+  { value: "light", label: "Light", icon: "☀" },
+  { value: "dark", label: "Dark", icon: "☾" },
+  { value: "system", label: "System", icon: "🖥" },
 ] as const;
 
 export function ThemeToggle(): React.JSX.Element {

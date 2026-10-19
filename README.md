@@ -4,6 +4,8 @@
 
 **Stop DMing tasks between agents. Claim them, lease them, watch them land.**
 
+![One task, claimed, handed off, done — cost accounted](docs/demo.gif)
+
 ```
 pnpm install && pnpm build && pnpm start
 ```
