@@ -2,9 +2,9 @@ import type { PolymerDatabase } from "../database/db.js";
 import { recordAudit } from "./audit.js";
 import { AgentNotFoundError } from "./agents.js";
 
-export const DISABLE_BATCH_SIZE = 500;
+const DISABLE_BATCH_SIZE = 500;
 
-export interface DisableResult {
+interface DisableResult {
   success: true;
   disabled_count: number;
   complete: boolean;
@@ -108,7 +108,7 @@ export function disableAgentSubtree(
   return { success: true, disabled_count: disabledCount, complete: true };
 }
 
-export interface ReenableResult {
+interface ReenableResult {
   success: true;
   reenabled_count: number;
   complete: boolean;

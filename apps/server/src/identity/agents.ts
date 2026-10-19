@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PolymerDatabase } from "../database/db.js";
 
-export const AGENT_STATUSES = [
+const AGENT_STATUSES = [
   "connecting",
   "connected",
   "idle",
@@ -11,7 +11,7 @@ export const AGENT_STATUSES = [
   "disabled",
 ] as const;
 
-export type AgentStatus = (typeof AGENT_STATUSES)[number];
+type AgentStatus = (typeof AGENT_STATUSES)[number];
 
 export interface Agent {
   agent_id: string;
@@ -25,7 +25,7 @@ export interface Agent {
   created_at: string;
 }
 
-export interface CreateAgentInput {
+interface CreateAgentInput {
   name: string;
   role: string;
   parentAgentId?: string | null;
@@ -49,7 +49,7 @@ export class AgentNotFoundError extends Error {
   }
 }
 
-export class InvalidAgentStatusError extends Error {
+class InvalidAgentStatusError extends Error {
   readonly code = "invalid_status";
   constructor(status: string) {
     super(`invalid agent status: ${status}`);
@@ -57,7 +57,7 @@ export class InvalidAgentStatusError extends Error {
   }
 }
 
-export class InvalidAgentRoleError extends Error {
+class InvalidAgentRoleError extends Error {
   readonly code = "invalid_role";
   constructor(role: string) {
     super(`invalid agent role: ${role}`);
@@ -65,7 +65,7 @@ export class InvalidAgentRoleError extends Error {
   }
 }
 
-export class InvalidCursorError extends Error {
+class InvalidCursorError extends Error {
   readonly code = "invalid_cursor";
   constructor() {
     super("invalid_cursor");
@@ -204,7 +204,7 @@ function decodeAgentCursor(cursor: string): number {
   return rowid;
 }
 
-export interface ListAgentsPageInput {
+interface ListAgentsPageInput {
   status?: string;
   role?: string;
   parentAgentId?: string;
@@ -266,7 +266,7 @@ export function listAgentsPage(
   };
 }
 
-export interface UpdateAgentProfileInput {
+interface UpdateAgentProfileInput {
   name?: string;
   role?: string;
 }

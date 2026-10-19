@@ -28,7 +28,7 @@ function num(value: unknown): number | null {
   return typeof value === "bigint" ? Number(value) : (value as number);
 }
 
-export interface TelemetrySummary {
+interface TelemetrySummary {
   total_comments: number;
   total_tasks: number;
   active_agents: number;
@@ -59,7 +59,7 @@ export function getTelemetrySummary(db: PolymerDatabase): TelemetrySummary {
   };
 }
 
-export interface AgentTelemetry {
+interface AgentTelemetry {
   agent_id: string;
   name: string;
   comments_sent: number;
@@ -100,13 +100,13 @@ export function listAgentTelemetry(db: PolymerDatabase): {
   };
 }
 
-export interface TimeRange {
+interface TimeRange {
   from: string;
   to: string;
 }
 
 /** Parse ?from=&to= into comparable ISO bounds (defaults: last 24h). */
-export function parseTimeRange(
+function parseTimeRange(
   fromRaw: string | undefined,
   toRaw: string | undefined,
   nowMs: number = Date.now(),
@@ -123,7 +123,7 @@ export function parseTimeRange(
   };
 }
 
-export interface TimelineEvent {
+interface TimelineEvent {
   usage_id: string;
   agent_id: string;
   task_id: string | null;
@@ -195,7 +195,7 @@ function decodeTimelineCursor(
   throw new Error("unreachable");
 }
 
-export interface TimelineInput {
+interface TimelineInput {
   from?: string;
   to?: string;
   agentId?: string;
@@ -286,9 +286,9 @@ function toTimelineEvent(row: Record<string, unknown>): TimelineEvent {
   };
 }
 
-export type CostGranularity = "hourly" | "daily";
+type CostGranularity = "hourly" | "daily";
 
-export interface CostsInput {
+interface CostsInput {
   granularity: string | undefined;
   from?: string;
   to?: string;

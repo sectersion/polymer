@@ -149,7 +149,7 @@ export function assertCoordinatorLease(
 
 /** Output of the component-14 probe write; the shape every coordinator
  * mutation output starts from (`task_id`, `version`, `updated_at`). */
-export interface LeasedWriteResult {
+interface LeasedWriteResult {
   task_id: string;
   version: number;
   updated_at: string;

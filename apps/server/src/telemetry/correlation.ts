@@ -18,7 +18,7 @@ import { listSpansByTrace, type StoredSpan } from "./spans.js";
  * is entered from a task's `trace_parent` link) later.
  */
 
-export interface TraceContext {
+interface TraceContext {
   traceId: string;
   parentSpanId: string;
   sampled: boolean;

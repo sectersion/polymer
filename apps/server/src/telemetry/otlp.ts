@@ -648,7 +648,7 @@ function decodeJson(value: unknown): ValidatedSpan[] {
   return spans;
 }
 
-export interface ParsedBatch {
+interface ParsedBatch {
   spans: ValidatedSpan[];
 }
 

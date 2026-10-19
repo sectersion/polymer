@@ -52,7 +52,7 @@ export interface Task {
   updated_at: string;
 }
 
-export interface TaskAssignment {
+interface TaskAssignment {
   id: number;
   task_id: string;
   agent_id: string;
@@ -83,7 +83,7 @@ function toTask(row: Record<string, unknown>): Task {
   };
 }
 
-export interface CreateTaskInput {
+interface CreateTaskInput {
   title: string;
   description?: string | null;
   traceParent?: string | null;
@@ -147,7 +147,7 @@ export function getTask(db: PolymerDatabase, taskId: string): Task | undefined {
   return row === undefined ? undefined : toTask(row);
 }
 
-export interface ListTasksInput {
+interface ListTasksInput {
   status?: string;
   createdBy?: string;
   assignedTo?: string;
@@ -266,12 +266,12 @@ export function catalogError(code: string): Error & { code: string } {
  * timestamps tie or interleave, so the order key travels with it.
  * Legacy `c<rowid>` cursors are rejected as `invalid_cursor`.
  */
-export function encodeTaskCursor(rowid: number, orderValue: string): string {
+function encodeTaskCursor(rowid: number, orderValue: string): string {
   return Buffer.from(`t${rowid}:${orderValue}`, "utf8").toString("base64url");
 }
 
 /** Inverse of encodeTaskCursor; throws `invalid_cursor` on tampering. */
-export function decodeTaskCursor(cursor: string): {
+function decodeTaskCursor(cursor: string): {
   rowid: number;
   orderValue: string;
 } {
@@ -302,7 +302,7 @@ function taskCursorPredicate(desc: boolean): {
   };
 }
 
-export interface TaskFilters {
+interface TaskFilters {
   status?: string;
   createdBy?: string;
   assignedTo?: string;
@@ -370,7 +370,7 @@ function taskWhere(input: TaskFilters): { sql: string; params: unknown[] } {
   };
 }
 
-export interface ListTasksPageInput extends TaskFilters {
+interface ListTasksPageInput extends TaskFilters {
   limit?: number;
   cursor?: string;
 }

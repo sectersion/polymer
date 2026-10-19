@@ -21,7 +21,7 @@ const BUFFER_SIZE = 1000;
  */
 const MAX_PENDING = 2000;
 /** Application close code for failed handshakes (spec: 4401). */
-export const HANDSHAKE_FAILED_CODE = 4401;
+const HANDSHAKE_FAILED_CODE = 4401;
 /** Session revalidation tick: backstop only, never the primary path. */
 export const REVALIDATE_INTERVAL_MS = 60_000;
 
@@ -220,7 +220,7 @@ export class EventBus {
   }
 }
 
-export interface HandshakeResult {
+interface HandshakeResult {
   ok: true;
   credentialId: string;
 }
@@ -231,7 +231,7 @@ export interface HandshakeResult {
  * same-origin check. Browsers always send Origin; absent Origin means
  * a non-browser client, which still faces session + CSRF.
  */
-export function validateHandshake(
+function validateHandshake(
   req: IncomingMessage,
   url: URL,
   db: PolymerDatabase,

@@ -8,7 +8,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
  * registered `invalid_cursor`/`invalid_request` extensions).
  */
 
-export const ADMIN_COOKIE = "__Host-polymer_admin";
+const ADMIN_COOKIE = "__Host-polymer_admin";
 
 export function readAdminCookie(req: IncomingMessage): string | undefined {
   const header = req.headers["cookie"];
@@ -45,7 +45,7 @@ export function constantTimeStringEqual(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb);
 }
 
-export const CATALOG_STATUS: Record<string, number> = {
+const CATALOG_STATUS: Record<string, number> = {
   task_not_found: 404,
   agent_not_found: 404,
   not_found: 404,
@@ -91,14 +91,13 @@ export const MAX_REQUEST_BYTES = 10 * 1024 * 1024;
  */
 export const MAX_JSON_BODY_BYTES = 1024 * 1024;
 
-export type ReadBodyResult =
+type ReadBodyResult =
   | { kind: "parsed"; value: unknown }
   | { kind: "empty" }
   | { kind: "invalid" }
   | { kind: "too-large" };
 
-export type RawBodyResult =
-  { kind: "ok"; bytes: Uint8Array } | { kind: "too-large" };
+type RawBodyResult = { kind: "ok"; bytes: Uint8Array } | { kind: "too-large" };
 
 /**
  * Byte-capable twin of readBody for binary payloads (OTLP protobuf):

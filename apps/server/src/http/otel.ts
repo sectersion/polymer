@@ -6,7 +6,7 @@ import { OtelError, parseOtlpBatch } from "../telemetry/otlp.js";
 import type { QueuedBatch } from "../telemetry/queue.js";
 import { readRawBody, sendJson } from "./common.js";
 
-export interface OtelOptions {
+interface OtelOptions {
   /** Base path (default "/otel"); the route is `<base>/v1/traces`. */
   endpoint: string;
   enabled: boolean;

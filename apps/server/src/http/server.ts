@@ -38,9 +38,9 @@ import {
 } from "../database/db.js";
 import { MAX_JSON_BODY_BYTES, MAX_REQUEST_BYTES, readBody } from "./common.js";
 
-export const HEALTH_PATH = "/health";
+const HEALTH_PATH = "/health";
 
-export interface PolymerServer {
+interface PolymerServer {
   server: Server;
   db: PolymerDatabase | null;
   /** End all live MCP sessions (used on shutdown so open SSE streams
@@ -57,7 +57,7 @@ export interface PolymerServer {
   events: EventBus;
 }
 
-export interface PolymerServerOptions {
+interface PolymerServerOptions {
   databasePath?: string;
   /** The host this server will be bound to (loopback default): drives
    * the Secure-flag requirement on the admin session cookie. */
@@ -781,7 +781,7 @@ function isBootstrapCall(body: unknown): boolean {
   return isRegisterAgentCall(body);
 }
 
-export interface ListeningServer extends PolymerServer {
+interface ListeningServer extends PolymerServer {
   url: string;
   close: () => Promise<void>;
   /** The fleet event bus (tests observe job emissions via replay). */
