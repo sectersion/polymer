@@ -4,6 +4,8 @@
 
 **Stop DMing tasks between agents. Claim them, lease them, watch them land.**
 
+![Live fleet: wren claims mason's lapsed lease on camera](docs/demo.gif)
+
 ```
 pnpm install && pnpm build && pnpm start
 ```
