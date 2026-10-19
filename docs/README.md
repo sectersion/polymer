@@ -3,8 +3,9 @@
 - [Design doc](../polymer_fleet_management_design_bringup.md): normative
   spec — it wins on any conflict. Lives at the repo root because
   tool-managed agent guidance references it there.
-- [Bringup workflow](BRINGUP_WORKFLOW.md): the component-by-component
-  build loop (plan → implement → test → review → commit → PR).
+- [Bringup workflow](BRINGUP_WORKFLOW.md): the superseded
+  component-by-component build loop (kept for history; the current path
+  is `AGENTS.md` § Workflow).
 - [Skill plan](SKILL_PLAN.md): what the agent skill package ships and
   the agent-side runtime contract.
 - [Human overview](HUMANS.md): what Polymer is, in plain language.

@@ -32,15 +32,35 @@ Normative spec: `polymer_fleet_management_design_bringup.md`. Design doc wins on
 4. **Delete, don't harden**: a finding on a code path nothing calls is answered by deleting the path.
 5. **Independent review before merge**: a review subagent (read-only) returns `PASS`/`CONDITIONAL`/`FAIL`; the author never merges their own PR.
 
-## Workflow
+## Workflow (idea → PR — follow in order, no skipping)
 
-The MVP bringup phase (components 0–32) is complete; the loop is now
-issue → small PR → review → merge. When work is still component-shaped,
-follow `docs/BRINGUP_WORKFLOW.md`: one component per change, smallest
-implementation → automated test → observe result → demonstrate the win
-condition through the narrowest realistic interface (real MCP client,
-real HTTP, real SQLite). Never combine unproven components in one
-commit, and never count a component done because it compiles.
+0. **Idea → issue.** Every change has an issue before a branch exists.
+   Label at creation: `bug` | `enhancement` | `documentation`
+   (+ `good first issue` / `contributor request` where applicable).
+   A vague one-liner gets a plan comment on the issue before work starts.
+1. **Plan on the issue.** One behavior, files to touch, explicit
+   out-of-scope, test/evidence strategy, applicable review skills.
+   Lock decisions before coding.
+2. **Branch `<kind>/<short-name>`** (`feat/…`, `fix/…`, `docs/…`,
+   `chore/…`). `main` moves only by PR merge. One open PR at a time.
+3. **Implement.** One behavior per PR. Apply the working agreement above
+   (issue-bound, invariant subject, delete-don't-harden).
+4. **Verify (local, in order — mirrors CI).** `pnpm build` → `pnpm lint` →
+   `pnpm typecheck` → `pnpm format:check` → scoped `test` → full `test`.
+   Run `pnpm e2e:fleet` when the diff touches server routes, MCP, or
+   telemetry. All required steps green before review is requested.
+5. **Review.** Self-review the diff against every applicable skill in
+   `skills/` (always `polymer-bringup-gate`); then independent review
+   (read-only subagent or human) with verdict `PASS` / `CONDITIONAL` /
+   `FAIL`. The author never merges their own PR.
+6. **Merge.** Squash, working tree clean, `main` green. Close the issue,
+   move to the next one.
+
+CI mapping (`ci.yml`): step 4's build/lint/typecheck/format run in the
+`quality` job; tests run as `tests (server+web × node)`; the conditional
+e2e runs in the `e2e (fleet)` job; image breakage fails the `docker` job.
+`docs/BRINGUP_WORKFLOW.md` is the superseded bringup-component loop —
+kept for history, not the current path.
 
 ## Review skills
 
