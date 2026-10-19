@@ -22,7 +22,7 @@ Normative spec: `polymer_fleet_management_design_bringup.md`. Design doc wins on
 - `apps/cli/` — deferred to v2, do not build
 - `packages/skill/` — agent skill + installer scripts
 - `skills/` — review checklists (see below)
-- `SKILL_PLAN.md` — what the skill package ships
+- `SKILL_PLAN.md` (in `docs/`) — what the skill package ships
 
 ## Workflow: component bringup
 

@@ -97,14 +97,13 @@ Open an issue with the failing step and the server log line. Catalog errors (`ve
 ## Documentation
 
 - [Design doc](polymer_fleet_management_design_bringup.md): normative spec, wins on conflict.
-- [Bringup workflow](BRINGUP_WORKFLOW.md): branch-per-change, PRs, no direct pushes.
+- [Docs index](docs/README.md): bringup workflow, skill plan, human overview.
 - [Agent skill](packages/skill/SKILL.md): lifecycle, telemetry attributes, rotation.
 - [Review skills](skills/): checklists applied to every change.
-- [Human overview](HUMANS.md): longer-form background.
 
 ## Contributing
 
-Open an issue or send a pull request. One change per branch, one component per commit (`bringup: <name>`), PRs reviewed before merge — never push straight to `main`. See [BRINGUP_WORKFLOW.md](BRINGUP_WORKFLOW.md).
+Open an issue or send a pull request. One change per branch, one component per commit (`bringup: <name>`), PRs reviewed before merge — never push straight to `main`. See [docs/BRINGUP_WORKFLOW.md](docs/BRINGUP_WORKFLOW.md).
 
 ## License
 

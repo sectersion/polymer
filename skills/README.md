@@ -1,6 +1,6 @@
 # Polymer Skills
 
-Code-review skills derived from `polymer_fleet_management_design_bringup.md` (normative) and `SKILL_PLAN.md`.
+Code-review skills derived from `../polymer_fleet_management_design_bringup.md` (normative) and `../docs/SKILL_PLAN.md`.
 Each skill is a review gate — use them on every diff before signoff.
 
 - `polymer-bringup-gate/` — component scope, win condition, commit rhythm

@@ -5,7 +5,7 @@ description: Gate any Polymer diff against its claimed bringup component. Verifi
 
 # Polymer Bringup Gate
 
-Source: `polymer_fleet_management_design_bringup.md` → Component Bringup Plan + Bringup Rule + Suggested Commit Rhythm.
+Source: `../../polymer_fleet_management_design_bringup.md` → Component Bringup Plan + Bringup Rule + Suggested Commit Rhythm.
 
 ## 1. Identify the claimed component
 
