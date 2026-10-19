@@ -9,7 +9,7 @@ import {
   requireActiveAgent,
 } from "./store.js";
 
-export const COMMENT_PAGE_DEFAULT = 50;
+const COMMENT_PAGE_DEFAULT = 50;
 export const COMMENT_PAGE_MAX = 500;
 /** get_task_detail embeds at most this many newest comments. */
 export const DETAIL_EMBEDDED_COMMENTS = 20;
@@ -21,14 +21,6 @@ export interface Comment {
   sender_type: "agent" | "human";
   content: string;
   trace_parent: string | null;
-  created_at: string;
-}
-
-export interface Mention {
-  mention_id: string;
-  comment_id: string;
-  mentioned_agent_id: string;
-  read: boolean;
   created_at: string;
 }
 
@@ -62,7 +54,7 @@ function toComment(row: Record<string, unknown>): Comment {
  * authenticated caller, never arguments) and resolve its mentions in
  * the same transaction.
  */
-export interface PostCommentResult {
+interface PostCommentResult {
   comment_id: string;
   task_id: string;
   sender_agent_id: string | null;
@@ -135,7 +127,7 @@ export function postComment(
   return post.immediate();
 }
 
-export interface UnreadPing {
+interface UnreadPing {
   mention_id: string;
   comment_id: string;
   task_id: string;
@@ -190,7 +182,7 @@ export function markPingRead(
 
 /** Opaque pagination cursor helpers are shared with the task list
  * (store.ts) so REST cursors never drift between surfaces. */
-export interface CommentPage {
+interface CommentPage {
   comments: Comment[];
   next_cursor: string | null;
 }

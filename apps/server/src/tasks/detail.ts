@@ -26,7 +26,7 @@ export function taskListItem(task: Task, assignedTo: string[]) {
   };
 }
 
-export interface TaskDetail {
+interface TaskDetail {
   task: Task;
   assigneeIds: string[];
   /** The newest embedded window + whether full history continues. */

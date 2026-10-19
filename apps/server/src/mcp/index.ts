@@ -9,7 +9,7 @@ import { registerTaskTools } from "./task-tools.js";
 
 export const MCP_PATH = "/mcp";
 
-export interface McpServerOptions {
+interface McpServerOptions {
   /**
    * Component 14: register test-only probe tools (`__test_lease_write`)
    * alongside the real surface. Default false — probes never ship in

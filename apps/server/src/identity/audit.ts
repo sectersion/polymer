@@ -11,7 +11,7 @@ import { encodeCursor, decodeCursor, catalogError } from "../tasks/store.js";
  * coordinator, version, generation, lease): never comment bodies,
  * never telemetry blobs, never credentials.
  */
-export interface AuditLogRow {
+interface AuditLogRow {
   audit_id: string;
   actor_type: "admin_session" | "master" | "system";
   actor_id: string;
@@ -22,7 +22,7 @@ export interface AuditLogRow {
   created_at: string;
 }
 
-export interface AuditInput {
+interface AuditInput {
   actor_type: "admin_session" | "master" | "system";
   actor_id: string;
   action: string;
@@ -50,17 +50,9 @@ function toAuditRow(row: Record<string, unknown>): AuditLogRow {
 
 /**
  * Narrow snapshot helper: task columns only (never comment bodies or
- * other payload columns) — the logging rule the design fixes.
+ * other payload columns) — the logging rule the design fixes. The
+ * caller-side `auditSnapshot` in tasks/mutations.ts owns this rule.
  */
-export function taskAuditSnapshot(task: Record<string, unknown>) {
-  return {
-    status: task["status"] ?? null,
-    coordinator: task["coordinator"] ?? null,
-    version: task["version"] ?? null,
-    lease_generation: task["lease_generation"] ?? null,
-    lease_expires_at: task["lease_expires_at"] ?? null,
-  };
-}
 
 export function recordAudit(
   db: PolymerDatabase,
@@ -86,7 +78,7 @@ export function recordAudit(
   return toAuditRow(row);
 }
 
-export interface AuditPage {
+interface AuditPage {
   entries: AuditLogRow[];
   next_cursor: string | null;
 }

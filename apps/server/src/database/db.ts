@@ -5,7 +5,7 @@ import { LATEST_VERSION, MIGRATIONS } from "./migrations.js";
 
 export type PolymerDatabase = Database.Database;
 
-export const DEFAULT_DATABASE_PATH = "./polymer.db";
+const DEFAULT_DATABASE_PATH = "./polymer.db";
 
 export function resolveDatabasePath(
   env: NodeJS.ProcessEnv = process.env,

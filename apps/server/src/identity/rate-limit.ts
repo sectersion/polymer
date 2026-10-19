@@ -4,7 +4,7 @@
  * comparison. One instance lives per server process; tests construct
  * their own instances.
  */
-export class FixedWindowLimiter {
+class FixedWindowLimiter {
   private readonly perKey = new Map<
     string,
     { windowStart: number; count: number }

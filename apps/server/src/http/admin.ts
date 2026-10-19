@@ -148,7 +148,7 @@ const ADMIN_TASK_MUTATIONS = [
 ];
 
 /** Does this path belong to the admin router? (GET /api/audit does.) */
-export function isAdminPath(pathname: string, method: string): boolean {
+function isAdminPath(pathname: string, method: string): boolean {
   if (pathname.startsWith("/api/auth/")) return true;
   if (pathname === "/api/audit") return true;
   if (pathname === "/api/tokens" || pathname.startsWith("/api/tokens/")) {
@@ -177,7 +177,7 @@ export function isAdminPath(pathname: string, method: string): boolean {
   return false;
 }
 
-export interface AdminLimiters {
+interface AdminLimiters {
   login: LoginLimiter;
   ops: AdminOpsLimiter;
 }

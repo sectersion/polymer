@@ -7,7 +7,7 @@
  * for later components must each add their own numbered migration here.
  */
 
-export interface Migration {
+interface Migration {
   version: number;
   name: string;
   up: string;

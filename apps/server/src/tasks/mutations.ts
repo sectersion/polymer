@@ -21,7 +21,7 @@ import {
 } from "./errors.js";
 import { assertCoordinatorLease, type ClaimTaskResult } from "./lease.js";
 
-export interface AssignTaskResult {
+interface AssignTaskResult {
   task_id: string;
   assigned_to: string[];
   version: number;
@@ -94,7 +94,7 @@ export function assignTask(
   return assign.immediate();
 }
 
-export interface TransferCoordinatorResult {
+interface TransferCoordinatorResult {
   task_id: string;
   coordinator: string;
   version: number;
@@ -177,7 +177,7 @@ export function transferCoordinator(
   return transfer.immediate();
 }
 
-export interface UnassignmentResult {
+interface UnassignmentResult {
   success: true;
   message: string;
 }
@@ -214,7 +214,7 @@ export function requestUnassignment(
   };
 }
 
-export interface TaskStatusMutationResult {
+interface TaskStatusMutationResult {
   task_id: string;
   status: TaskStatus;
   version: number;
@@ -300,7 +300,7 @@ const TASK_TRANSITIONS: Partial<Record<TaskStatus, TaskStatus[]>> = {
 };
 
 /** Illegal transition anywhere → invalid_status. */
-export function assertTaskTransition(from: TaskStatus, to: TaskStatus): void {
+function assertTaskTransition(from: TaskStatus, to: TaskStatus): void {
   if (!(TASK_TRANSITIONS[from] ?? []).includes(to)) {
     throw new TaskInvalidStatusError(to);
   }
@@ -401,7 +401,7 @@ export function adminClaimTask(
  * bumps version AND generation. Entering done/failed clears the lease
  * on either path. Audit row only for the force bypass.
  */
-export interface AdminStatusResult {
+interface AdminStatusResult {
   task_id: string;
   status: TaskStatus;
   version: number;
@@ -672,7 +672,7 @@ export function adminTransferCoordinator(
   return write.immediate();
 }
 
-export interface BulkStatusItem {
+interface BulkStatusItem {
   task_id: string;
   ok: boolean;
   status?: TaskStatus;
@@ -754,7 +754,7 @@ export function adminBulkUpdateStatus(
   }
   return { results };
 }
-export interface BulkAssignItem {
+interface BulkAssignItem {
   task_id: string;
   ok: boolean;
   assigned_to?: string[];

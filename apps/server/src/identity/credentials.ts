@@ -11,15 +11,8 @@ import { recordAudit } from "./audit.js";
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const RECONNECT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-export const CREDENTIAL_TYPES = [
-  "master",
-  "init",
-  "agent_session",
-  "agent_reconnect",
-  "admin_session",
-] as const;
-
-export type CredentialType = (typeof CREDENTIAL_TYPES)[number];
+type CredentialType =
+  "master" | "init" | "agent_session" | "agent_reconnect" | "admin_session";
 
 export interface Credential {
   credential_id: string;
@@ -38,7 +31,7 @@ export interface Credential {
   csrf: string | null;
 }
 
-export interface MintCredentialInput {
+interface MintCredentialInput {
   type: CredentialType;
   /** Plaintext secret. Generated when omitted (machine types + init OTP). */
   secret?: string;
@@ -202,7 +195,7 @@ export function getCredentialByPublicId(
   return row === undefined ? undefined : toCredential(row);
 }
 
-export type VerifyFailure = "not_found" | "revoked" | "expired" | "invalid";
+type VerifyFailure = "not_found" | "revoked" | "expired" | "invalid";
 
 function constantTimeHexEqual(aHex: string, bHex: string): boolean {
   let a: Buffer;
@@ -250,7 +243,7 @@ export function revokeCredential(
   return row === undefined ? undefined : toCredential(row);
 }
 
-export interface SessionPrincipal {
+interface SessionPrincipal {
   agentId: string;
   credentialId: string;
 }
@@ -320,7 +313,7 @@ export class RefreshError extends Error {
   }
 }
 
-export interface RefreshOutput {
+interface RefreshOutput {
   agent_id: string;
   session_token: string;
   reconnect_secret: string;
@@ -487,7 +480,7 @@ export function getAdminCsrf(
   return cred.csrf ?? undefined;
 }
 
-export interface RotateMasterResult {
+interface RotateMasterResult {
   master_credential: string;
   rotated_at: string;
 }

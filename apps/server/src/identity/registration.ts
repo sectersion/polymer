@@ -7,7 +7,7 @@ import {
 } from "./credentials.js";
 import type { PolymerDatabase } from "../database/db.js";
 
-export interface RegisterAgentInput {
+interface RegisterAgentInput {
   initTokenId: string;
   initToken: string;
   name: string;
@@ -15,7 +15,7 @@ export interface RegisterAgentInput {
   heartbeatTimeoutSeconds?: number;
 }
 
-export interface RegisterAgentOutput {
+interface RegisterAgentOutput {
   agent_id: string;
   session_token: string;
   reconnect_secret: string;
@@ -121,13 +121,13 @@ export function registerAgent(
   }
 }
 
-export interface RegisterSubagentInput {
+interface RegisterSubagentInput {
   name: string;
   role: string;
   heartbeatTimeoutSeconds?: number;
 }
 
-export interface RegisterSubagentOutput {
+interface RegisterSubagentOutput {
   agent_id: string;
   parent_agent_id: string;
   session_token: string;

@@ -32,9 +32,9 @@ export class HeartbeatUnauthorizedError extends Error {
 }
 
 /** Max status flips per sweep statement (single-writer rule). */
-export const LIVENESS_BATCH_ROWS = 500;
+const LIVENESS_BATCH_ROWS = 500;
 /** Max lease notifications per notifier run (bounded burst). */
-export const LEASE_NOTIFY_BATCH_ROWS = 500;
+const LEASE_NOTIFY_BATCH_ROWS = 500;
 
 function hasLiveLease(
   db: PolymerDatabase,
@@ -71,7 +71,7 @@ export function recordHeartbeat(
   return { success: true as const, timestamp: nowIso };
 }
 
-export interface LivenessSweepResult {
+interface LivenessSweepResult {
   marked: string[];
   truncated: boolean;
 }
@@ -126,7 +126,7 @@ export function runLivenessSweep(
   return { marked, truncated };
 }
 
-export interface ExpiredLease {
+interface ExpiredLease {
   task_id: string;
   coordinator: string;
   lease_generation: number;
