@@ -50,6 +50,26 @@ async function freePort(): Promise<number> {
 }
 
 describe("polymer-setup one-command bootstrap", () => {
+  it("creates a --dir that does not exist instead of crashing (audit #28)", async () => {
+    const base = mkdtempSync(join(tmpdir(), "polymer-setup-"));
+    const dir = join(base, "nested", "fresh-agent");
+    const port = await freePort();
+    const db = tempDbPath("polymer-setup-dir-");
+    const run = await runSetup([
+      "--name",
+      "setup-dir-agent",
+      "--dir",
+      dir,
+      "--db",
+      db,
+      "--port",
+      String(port),
+    ]);
+    expect(run.status).toBe(0);
+    expect(JSON.parse(run.stdout)["ok"]).toBe(true);
+    expect(readFileSync(join(dir, ".polymrc"), "utf8")).toContain("server");
+  }, 90000);
+
   it("boots a daemon, enrolls, verifies; reruns reuse; stop kills", async () => {
     const dir = mkdtempSync(join(tmpdir(), "polymer-setup-"));
     const port = await freePort();

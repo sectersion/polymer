@@ -23,6 +23,7 @@ import {
   chmodSync,
   closeSync,
   existsSync,
+  mkdirSync,
   openSync,
   readFileSync,
   unlinkSync,
@@ -207,6 +208,9 @@ async function main() {
     return;
   }
   const dir = resolve(argOf(argv, "--dir") ?? ".");
+  // The daemon log opens below and install.mjs is too late — the
+  // directory must exist before anything in it is touched.
+  mkdirSync(dir, { recursive: true });
   if (argv.includes("--stop")) {
     await stopDaemon(dir);
     return;
