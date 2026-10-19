@@ -2,7 +2,7 @@
 
 > Living document. Written from the design plan before code exists;
 > expand each section as components land. Normative spec lives in
-> `polymer_fleet_management_design_bringup.md` — this file explains,
+> `../polymer_fleet_management_design_bringup.md` — this file explains,
 > it does not decide.
 
 ## What Polymer is
@@ -61,7 +61,7 @@ nothing pushes.
 
 ## Where to look
 
-- Design + build order: `polymer_fleet_management_design_bringup.md`
-- Skill contents + agent responsibilities: `SKILL_PLAN.md`
+- Design + build order: `../polymer_fleet_management_design_bringup.md`
+- Skill contents + agent responsibilities: `SKILL_PLAN.md` (this directory)
 - Web stack + look: "Web UI Stack" + "Page Map" in the design doc
 - Deferred ideas: "Parking Lot" in the design doc

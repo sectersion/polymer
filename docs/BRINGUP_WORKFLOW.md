@@ -4,10 +4,11 @@ Reproducible loop for building Polymer component-by-component.
 Invoke with: "Run BRINGUP_WORKFLOW.md for component N."
 One component per pass, one commit per component (`bringup: <name>`).
 
-Spec: `polymer_fleet_management_design_bringup.md` (design doc wins on conflict).
-Checklists: `skills/polymer-bringup-gate/SKILL.md` (always) + whichever of
-`polymer-security-review`, `polymer-concurrency-review`,
-`polymer-api-contract-review`, `polymer-telemetry-review` the component touches.
+Spec: `../polymer_fleet_management_design_bringup.md` (design doc wins on conflict).
+Checklists: `../skills/polymer-bringup-gate/SKILL.md` (always) + whichever of
+`../skills/polymer-security-review`, `../skills/polymer-concurrency-review`,
+`../skills/polymer-api-contract-review`, `../skills/polymer-telemetry-review`
+the component touches.
 
 ## Phase 1 — Instruct (plan, no code changes)
 
