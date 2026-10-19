@@ -589,12 +589,18 @@ The table (C = CSRF required):
 
 ### Error Catalog (MCP code → HTTP status on REST)
 
-REST-transport-only errors (no MCP tool boundary crossing; no MCP code mapping):
+REST-transport-only rows (never produced by an MCP tool handler, so they have
+no MCP code mapping):
 
-    invalid_request          400    malformed body/query (incl. invalid_cursor extension)
     method_not_allowed       405    verb not registered for the path
     payload_too_large        413    body exceeds the configured size cap
     internal_error           500    unexpected handler failure (never leaks internals)
+
+`invalid_request` (400, malformed body/query) is a registered MCP-catalog
+extension (`common.ts`, alongside `invalid_cursor` 400, which is its own
+distinct code, not a variant): it originates on REST transport parsing, but
+surfaces on MCP too — tool handlers rethrow it as JSON-RPC InvalidRequest
+(e.g. `list_agents`).
 
     invalid_token            401    unknown/wrong credential
     token_expired            400    correct init code, too late
