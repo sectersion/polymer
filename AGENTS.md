@@ -17,21 +17,30 @@ Normative spec: `polymer_fleet_management_design_bringup.md`. Design doc wins on
 
 ## Layout
 
-- `apps/server/` — MCP server, REST API, OTLP receiver, SQLite (MVP)
+- `apps/server/` — MCP server, REST API, OTLP receiver, SQLite. MVP complete (components 0–32).
 - `apps/web/` — Next.js UI (Fleet, Agents, Tasks, Tokens, Telemetry)
 - `apps/cli/` — deferred to v2, do not build
-- `packages/skill/` — agent skill + installer scripts
+- `packages/skill/` — agent skill + installer scripts (`polymer-install`, `polymer-setup`, `polymer-status`, `polymer-refresh`, `polymer-proxy`)
 - `skills/` — review checklists (see below)
-- `SKILL_PLAN.md` (in `docs/`) — what the skill package ships
+- `docs/` — design-doc companions: bringup workflow, skill plan, human overview, index
 
-## Workflow: component bringup
+## Working agreement (how every change lands — issue #34)
 
-Work proceeds component-by-component (0–32 in the design doc).
-One component per change: build smallest implementation → automated test →
-observe result → fix → demonstrate win condition → commit (`bringup: <name>`).
-Never combine unproven components in one commit. Never count a component done
-because it compiles; the stated win condition must be demonstrated through the
-narrowest realistic interface (real MCP client, real HTTP, real SQLite).
+1. Every change is **issue-bound**: commit title and PR carry the issue number. No issue, no change.
+2. **Commit subjects are invariants**, not summaries — a falsifiable behavior claim the reviewer can check (_"X never happens, because Y"_).
+3. **One behavior per PR, landed daily.** Cap work-in-progress at one open PR.
+4. **Delete, don't harden**: a finding on a code path nothing calls is answered by deleting the path.
+5. **Independent review before merge**: a review subagent (read-only) returns `PASS`/`CONDITIONAL`/`FAIL`; the author never merges their own PR.
+
+## Workflow
+
+The MVP bringup phase (components 0–32) is complete; the loop is now
+issue → small PR → review → merge. When work is still component-shaped,
+follow `docs/BRINGUP_WORKFLOW.md`: one component per change, smallest
+implementation → automated test → observe result → demonstrate the win
+condition through the narrowest realistic interface (real MCP client,
+real HTTP, real SQLite). Never combine unproven components in one
+commit, and never count a component done because it compiles.
 
 ## Review skills
 
@@ -46,14 +55,20 @@ starting work, and apply all of them to the diff before signoff:
 
 ## Commands
 
-- `pnpm install` / `pnpm build` / `pnpm test`
-- `pnpm --filter @polymer/server <test|lint|typecheck|build|dev>`
-- Server: `pnpm start` (or `--filter @polymer/server start`); config `POLYMER.json`, env `POLYMER_PORT`, `POLYMER_HOST`
+- `pnpm install` / `pnpm build` / `pnpm test` / `pnpm lint` / `pnpm typecheck` / `pnpm format:check`
+- `pnpm --filter @polymer/server <test|lint|typecheck|build|dev>`; same for `@polymer/web` and `@polymer/skill`
+- `pnpm e2e:fleet` — full fleet scenario over real MCP/HTTP/SQLite/OTLP; the proof step for any claim
+- `pnpm demo` — built stack with seeded fleet (`scripts/demo.mjs`)
+- Server: `pnpm start`; config `POLYMER.json`, env `POLYMER_PORT`, `POLYMER_HOST`
+- CI (`.github/workflows/ci.yml`): parallel matrix — quality (build/lint/typecheck/format), tests (server+web × node 22/24, server coverage report-only), e2e, docker
 
 ## Rules
 
 - Identity comes from validated credentials in request context — never from
   `agent_id` args or telemetry attributes. Never log secrets.
 - Money is integer micro-USD, never float. Trace/span IDs are OTel-native, not UUIDs.
-- SQLite first; no PostgreSQL, no ORM (Kysely only reconsidered later, never an ORM).
+- SQLite first; no PostgreSQL (Phase-1 seam only, issue #21), no ORM (Kysely only
+  reconsidered later, never an ORM).
+- Gate a step on a command's exit code only under `set -o pipefail` — a piped
+  `tail`/`grep` otherwise swallows failures (lesson from audit #29).
 - Prefer editing existing files over creating new ones. Keep changes minimal.
