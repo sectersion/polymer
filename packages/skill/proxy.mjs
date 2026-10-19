@@ -46,7 +46,9 @@ let rc = null;
 try {
   rc = JSON.parse(readFileSync(rcPath, "utf8"));
 } catch {
-  fail(`no usable credentials: ${rcPath} is missing or unreadable (run polymer-install first)`);
+  fail(
+    `no usable credentials: ${rcPath} is missing or unreadable (run polymer-install first)`,
+  );
 }
 const server = argOf(process.argv, "--server") ?? rc.server;
 if (!server || typeof rc.session_token !== "string") {

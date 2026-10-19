@@ -45,7 +45,7 @@ function usage() {
     "Enroll an agent on a Polymer server. OTP arguments are required",
     "only when no working credentials exist yet for --server/--name.",
     "--client picks the config format: opencode writes/merges",
-    "opencode.json (mcp.servers, type \"remote\"); claude writes",
+    'opencode.json (mcp.servers, type "remote"); claude writes',
     '.mcp.json (mcpServers, type "http").',
   ].join("\n");
 }
@@ -201,19 +201,13 @@ function writeOpencodeConfig(dir) {
     const text = readFileSync(path, "utf8");
     if (text.trim() !== "") {
       try {
-        config = JSON.parse(
-          path.endsWith(".jsonc") ? stripJsonc(text) : text,
-        );
+        config = JSON.parse(path.endsWith(".jsonc") ? stripJsonc(text) : text);
       } catch (err) {
         throw new Error(`cannot parse ${path}: ${err.message}`);
       }
     }
   }
-  if (
-    typeof config !== "object" ||
-    config === null ||
-    Array.isArray(config)
-  ) {
+  if (typeof config !== "object" || config === null || Array.isArray(config)) {
     throw new Error(`${path} does not contain a JSON object`);
   }
   config.$schema ??= "https://opencode.ai/config.json";

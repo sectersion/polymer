@@ -26,7 +26,10 @@ export function DisableButton({
     };
     setBusy(false);
     if (!res.ok) {
-      pushToast({ kind: "error", message: "Disable failed — see server logs." });
+      pushToast({
+        kind: "error",
+        message: "Disable failed — see server logs.",
+      });
       return;
     }
     pushToast({

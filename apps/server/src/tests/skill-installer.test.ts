@@ -1,10 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import {
-  mkdtempSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -117,9 +112,8 @@ describe("skill installer (component 30)", () => {
       ) as Record<string, unknown>;
       expect(oc["$schema"]).toBe("https://opencode.ai/config.json");
       const polymer = (
-        (oc["mcp"] as Record<string, Record<string, Record<string, unknown>>>)
-          .servers["polymer"]
-      );
+        oc["mcp"] as Record<string, Record<string, Record<string, unknown>>>
+      ).servers["polymer"];
       expect(polymer["type"]).toBe("local");
       expect(polymer["command"]).toEqual([
         process.execPath,
@@ -134,9 +128,7 @@ describe("skill installer (component 30)", () => {
 
       // AGENTS.md carries exactly one managed Polymer section.
       const agentsMd = readFileSync(join(dir, "AGENTS.md"), "utf8");
-      expect(
-        agentsMd.split("<!-- polymer:start -->").length - 1,
-      ).toBe(1);
+      expect(agentsMd.split("<!-- polymer:start -->").length - 1).toBe(1);
       expect(agentsMd).toContain(app.url);
       expect(agentsMd).toContain("Do not hand-roll HTTP");
 
@@ -162,9 +154,7 @@ describe("skill installer (component 30)", () => {
         gitignore2.split("\n").filter((l) => l.trim() === ".polymrc"),
       ).toHaveLength(1);
       const agentsMd2 = readFileSync(join(dir, "AGENTS.md"), "utf8");
-      expect(
-        agentsMd2.split("<!-- polymer:start -->").length - 1,
-      ).toBe(1);
+      expect(agentsMd2.split("<!-- polymer:start -->").length - 1).toBe(1);
     } finally {
       await app.close();
     }
@@ -253,7 +243,19 @@ describe("skill installer (component 30)", () => {
       const dir = tempRepo();
       writeFileSync(
         join(dir, "opencode.json"),
-        JSON.stringify({ $schema: "https://opencode.ai/config.json", model: "existing/model", mcp: { servers: { other: { type: "remote", url: "https://mcp.other.example/mcp" } } } }, null, 2),
+        JSON.stringify(
+          {
+            $schema: "https://opencode.ai/config.json",
+            model: "existing/model",
+            mcp: {
+              servers: {
+                other: { type: "remote", url: "https://mcp.other.example/mcp" },
+              },
+            },
+          },
+          null,
+          2,
+        ),
       );
       const merged = await install(app, dir, [
         "--name",
@@ -268,10 +270,8 @@ describe("skill installer (component 30)", () => {
         readFileSync(join(dir, "opencode.json"), "utf8"),
       ) as Record<string, unknown>;
       expect(oc["model"]).toBe("existing/model");
-      const servers = (
-        (oc["mcp"] as Record<string, Record<string, unknown>>)
-          .servers
-      ) as Record<string, unknown>;
+      const servers = (oc["mcp"] as Record<string, Record<string, unknown>>)
+        .servers as Record<string, unknown>;
       expect(servers["other"]).toBeDefined();
       expect(servers["polymer"]).toBeDefined();
 
@@ -280,7 +280,16 @@ describe("skill installer (component 30)", () => {
       writeFileSync(
         join(conflictDir, "opencode.json"),
         JSON.stringify(
-          { mcp: { servers: { polymer: { type: "remote", url: "https://elsewhere.example/mcp" } } } },
+          {
+            mcp: {
+              servers: {
+                polymer: {
+                  type: "remote",
+                  url: "https://elsewhere.example/mcp",
+                },
+              },
+            },
+          },
           null,
           2,
         ),
@@ -297,12 +306,16 @@ describe("skill installer (component 30)", () => {
         s2,
       ]);
       expect(conflict.status).toBe(1);
-      expect(conflict.stderr).toContain("different \"polymer\"");
+      expect(conflict.stderr).toContain('different "polymer"');
       const untouched = JSON.parse(
         readFileSync(join(conflictDir, "opencode.json"), "utf8"),
       ) as Record<string, unknown>;
       expect(
-        ((untouched["mcp"] as Record<string, Record<string, unknown>>).servers["polymer"] as Record<string, unknown>)["url"],
+        (
+          (untouched["mcp"] as Record<string, Record<string, unknown>>).servers[
+            "polymer"
+          ] as Record<string, unknown>
+        )["url"],
       ).toBe("https://elsewhere.example/mcp");
     } finally {
       await app.close();
