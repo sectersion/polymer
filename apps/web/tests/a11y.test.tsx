@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
+import { cleanup, render, screen, fireEvent } from "@testing-library/react";
 import React from "react";
+
+// Unmount after every test: an un-cleaned root leaves React's scheduler
+// a setImmediate render that fires after the jsdom environment tears
+// down ("window is not defined"), failing the run nondeterministically
+// (issue #31).
+afterEach(cleanup);
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
