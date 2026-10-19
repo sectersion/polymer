@@ -1,7 +1,11 @@
 # Bringup Workflow
 
-Reproducible loop for building Polymer component-by-component.
-Invoke with: "Run BRINGUP_WORKFLOW.md for component N."
+> Superseded: the MVP bringup phase (components 0–32) is complete. The
+> normative path is now `AGENTS.md` § Workflow (idea → PR). This file is
+> kept for history.
+
+Historical loop for building Polymer component-by-component (do not
+invoke for new work).
 One component per pass, one commit per component (`bringup: <name>`).
 
 Spec: `../polymer_fleet_management_design_bringup.md` (design doc wins on conflict).
