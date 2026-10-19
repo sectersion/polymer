@@ -193,7 +193,7 @@ function findOpencodeConfig(dir) {
  * differs from ours is an error, never a silent clobber — identical
  * entries make reruns idempotent.
  */
-function writeOpencodeConfig(dir, server) {
+function writeOpencodeConfig(dir) {
   const desired = opencodeEntry(dir);
   const path = findOpencodeConfig(dir) ?? join(dir, "opencode.json");
   let config = {};
@@ -247,7 +247,7 @@ function writeOpencodeConfig(dir, server) {
 function writeClientConfig(dir, server, client) {
   return client === "claude"
     ? writeMcpJson(dir, server, client)
-    : writeOpencodeConfig(dir, server);
+    : writeOpencodeConfig(dir);
 }
 
 function agentsMdBlock(server) {
