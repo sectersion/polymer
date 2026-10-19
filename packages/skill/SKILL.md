@@ -54,9 +54,19 @@ Highest precedence first:
 
 `.polymrc` is untracked by design — the installer appends it to
 `.gitignore`. Never paste its contents into comments, logs, or
-prompts. The MCP client config (`.mcp.json`) carries the server URL
-only; the Bearer credential travels in client headers, resolved per
-the order above.
+prompts. The MCP client config is host-native and carries no
+secrets: `opencode.json` (`mcp.servers.polymer`, a `local` stdio
+entry running `polymer-proxy`) for OpenCode, `.mcp.json` (type
+`http`) for Claude Code. The Bearer credential travels out of band:
+the OpenCode bridge reads it from `.polymrc` directly (OpenCode's
+shared service does not inherit the agent shell's environment, so
+env-substituted headers arrive empty), while Claude Code resolves
+`${POLYMER_SESSION_TOKEN}` in headers from the environment — set it
+from `.polymrc` before launch, per the order above. The installer
+also leaves a marker-delimited Polymer section in `AGENTS.md` so an
+agent launched with no prompt discovers the managed connection and
+uses the preconfigured `polymer` tools instead of hand-rolling
+clients.
 
 ## Tool lifecycle
 

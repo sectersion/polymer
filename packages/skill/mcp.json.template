@@ -2,7 +2,10 @@
   "mcpServers": {
     "polymer": {
       "type": "${MCP_TYPE}",
-      "url": "${POLYMER_SERVER}/mcp"
+      "url": "${POLYMER_SERVER}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${POLYMER_SESSION_TOKEN}"
+      }
     }
   }
 }
