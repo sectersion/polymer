@@ -23,6 +23,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { execSync } from "node:child_process";
@@ -49,6 +50,16 @@ code,pre,kbd,samp{font-family:"DejaVu Sans Mono",monospace !important}
 `;
 
 async function main() {
+  // A retake must never assemble the previous take: clear the camera's
+  // own artifacts (video, stills, cues) before it rolls. demo-state.json
+  // is owned by the seed, which rewrites it on every boot — not deleted.
+  for (const v of readdirSync(CAPDIR)) {
+    if (/^page@.*\.webm$/.test(v) || v === "demo.mp4") {
+      rmSync(join(CAPDIR, v), { force: true });
+    }
+  }
+  rmSync(STILLS, { recursive: true, force: true });
+  rmSync(`${CAPDIR}/cues.json`, { force: true });
   mkdirSync(STILLS, { recursive: true });
   for (let i = 0; i < 150; i += 1) {
     if (existsSync(STATE)) {
@@ -63,6 +74,19 @@ async function main() {
   }
   const S = JSON.parse(readFileSync(STATE, "utf8"));
   out("state ready");
+
+  // The state file may outlive its stack — refuse to film a dead one.
+  for (const [name, url] of [
+    ["server", `${S.server_url}/health`],
+    ["web", S.web_url],
+  ]) {
+    const r = await fetch(url).catch(() => null);
+    if (!r || (r.status !== 200 && r.status !== 307)) {
+      throw new Error(
+        `capture: ${name} at ${url} is not up (status ${r?.status ?? "unreachable"}) — boot seed.mjs first`,
+      );
+    }
+  }
 
   const { chromium } = await import(PW_PATH);
   const browser = await chromium.launch({

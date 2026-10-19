@@ -36,8 +36,12 @@ const STATE_PATH = `${CAPDIR}/demo-state.json`;
 
 const out = (...rest) => console.error("[seed]", ...rest);
 
+// Set when cleanup() runs so the server child's intentional SIGTERM
+// during shutdown is not mistaken for a crash.
+let shuttingDown = false;
+
 function bootServer() {
-  return new Promise((resolveBoot) => {
+  return new Promise((resolveBoot, rejectBoot) => {
     const dir = mkdtempSync(join(tmpdir(), "polymer-demo-"));
     const child = spawn(
       process.execPath,
@@ -50,6 +54,25 @@ function bootServer() {
       },
     );
     let stderr = "";
+    const fail = (why) =>
+      rejectBoot(
+        new Error(`seed: server child failed (${why}): ${stderr.trim()}`),
+      );
+    child.on("error", (e) => fail(e.message));
+    const onExit = (code) => {
+      // The server prints the master credential before it finishes
+      // listening, so a bind failure (EADDRINUSE, bad build) lands here
+      // *after* resolve. Any unexpected death must kill the seed loudly
+      // instead of hanging a later wait loop.
+      if (code !== 0 && code !== null && !shuttingDown) {
+        console.error(
+          `[seed] FATAL server child died (exit ${code}): ${stderr.trim()}`,
+        );
+        process.exit(1);
+      }
+      if (code !== 0) fail(`exit ${code}`);
+    };
+    child.on("exit", onExit);
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (c) => {
       stderr += c;
@@ -278,6 +301,8 @@ async function main() {
   console.log(JSON.stringify({ ok: true, state_path: STATE_PATH }));
 
   const cleanup = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     out("shutting down");
     web.kill("SIGTERM");
     server.kill("SIGTERM");
