@@ -11,15 +11,8 @@ import { recordAudit } from "./audit.js";
 export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const RECONNECT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-const CREDENTIAL_TYPES = [
-  "master",
-  "init",
-  "agent_session",
-  "agent_reconnect",
-  "admin_session",
-] as const;
-
-type CredentialType = (typeof CREDENTIAL_TYPES)[number];
+type CredentialType =
+  "master" | "init" | "agent_session" | "agent_reconnect" | "admin_session";
 
 export interface Credential {
   credential_id: string;

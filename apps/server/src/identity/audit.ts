@@ -50,17 +50,9 @@ function toAuditRow(row: Record<string, unknown>): AuditLogRow {
 
 /**
  * Narrow snapshot helper: task columns only (never comment bodies or
- * other payload columns) — the logging rule the design fixes.
+ * other payload columns) — the logging rule the design fixes. The
+ * caller-side `auditSnapshot` in tasks/mutations.ts owns this rule.
  */
-function taskAuditSnapshot(task: Record<string, unknown>) {
-  return {
-    status: task["status"] ?? null,
-    coordinator: task["coordinator"] ?? null,
-    version: task["version"] ?? null,
-    lease_generation: task["lease_generation"] ?? null,
-    lease_expires_at: task["lease_expires_at"] ?? null,
-  };
-}
 
 export function recordAudit(
   db: PolymerDatabase,

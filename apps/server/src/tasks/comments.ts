@@ -24,14 +24,6 @@ export interface Comment {
   created_at: string;
 }
 
-interface Mention {
-  mention_id: string;
-  comment_id: string;
-  mentioned_agent_id: string;
-  read: boolean;
-  created_at: string;
-}
-
 /** Catalog `not_found` — deliberately shared with unknown ids so a
  * mention cannot be probed for existence across agents. */
 export class PingNotFoundError extends Error {
