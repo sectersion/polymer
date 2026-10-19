@@ -9,10 +9,17 @@
  * Writes into --dir (created if missing):
  * - `.polymrc` (mode 0600): server, agent identity, session +
  *   reconnect secrets, OTel endpoint. NEVER logged or printed.
- * - `.mcp.json`: MCP client config from mcp.json.template — server
- *   URL only, no secrets, safe to track.
+ * - Host-native MCP client config, no secrets, safe to track:
+ *   `opencode.json` for --client opencode (merged into an existing
+ *   config, `mcp.servers.polymer` entry); `.mcp.json` for --client
+ *   claude (from mcp.json.template). The Bearer travels via
+ *   `{env:POLYMER_SESSION_TOKEN}` / `${POLYMER_SESSION_TOKEN}` header
+ *   substitution, never a literal secret.
  * - `.gitignore`: gains a `.polymrc` line (exact-line match, so
  *   reruns never duplicate it).
+ * - `AGENTS.md`: a marker-delimited Polymer section telling the agent
+ *   a managed MCP connection exists — so it uses the preconfigured
+ *   `polymer` tools instead of hand-rolling HTTP clients.
  */
 
 import {
@@ -37,8 +44,9 @@ function usage() {
     "",
     "Enroll an agent on a Polymer server. OTP arguments are required",
     "only when no working credentials exist yet for --server/--name.",
-    "--client picks the .mcp.json transport type (opencode wants",
-    '"remote", Claude Code wants "http").',
+    "--client picks the config format: opencode writes/merges",
+    "opencode.json (mcp.servers, type \"remote\"); claude writes",
+    '.mcp.json (mcpServers, type "http").',
   ].join("\n");
 }
 
@@ -139,6 +147,153 @@ function writeMcpJson(dir, server, client) {
   );
 }
 
+/**
+ * Minimal JSONC handling for hand-edited opencode.jsonc files:
+ * strip comments and trailing commas so JSON.parse accepts the text.
+ * Formatting is not preserved — the file is rewritten as JSON.
+ */
+function stripJsonc(text) {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1")
+    .replace(/,(\s*[}\]])/g, "$1");
+}
+
+/**
+ * The OpenCode entry is a `local` stdio bridge rather than a `remote`
+ * entry: OpenCode's shared background service owns remote MCP
+ * connections and does not inherit the agent shell's environment, so
+ * `{env:...}` header substitution arrives empty (HTTP 401). The
+ * bridge reads the Bearer from `.polymrc` directly — no secret in
+ * argv, env, or this (tracked) config file.
+ */
+function opencodeEntry(dir) {
+  return {
+    type: "local",
+    command: [process.execPath, join(HERE, "proxy.mjs"), "--dir", dir],
+  };
+}
+
+function findOpencodeConfig(dir) {
+  for (const rel of [
+    "opencode.json",
+    "opencode.jsonc",
+    join(".opencode", "opencode.json"),
+    join(".opencode", "opencode.jsonc"),
+  ]) {
+    const path = join(dir, rel);
+    if (existsSync(path)) return path;
+  }
+  return null;
+}
+
+/**
+ * Write or merge the `polymer` server entry into the project's
+ * OpenCode config (V2 shape: mcp.servers). An existing entry that
+ * differs from ours is an error, never a silent clobber — identical
+ * entries make reruns idempotent.
+ */
+function writeOpencodeConfig(dir) {
+  const desired = opencodeEntry(dir);
+  const path = findOpencodeConfig(dir) ?? join(dir, "opencode.json");
+  let config = {};
+  if (existsSync(path)) {
+    const text = readFileSync(path, "utf8");
+    if (text.trim() !== "") {
+      try {
+        config = JSON.parse(
+          path.endsWith(".jsonc") ? stripJsonc(text) : text,
+        );
+      } catch (err) {
+        throw new Error(`cannot parse ${path}: ${err.message}`);
+      }
+    }
+  }
+  if (
+    typeof config !== "object" ||
+    config === null ||
+    Array.isArray(config)
+  ) {
+    throw new Error(`${path} does not contain a JSON object`);
+  }
+  config.$schema ??= "https://opencode.ai/config.json";
+  const mcp = (config.mcp ??= {});
+  if (typeof mcp !== "object" || mcp === null || Array.isArray(mcp)) {
+    throw new Error(`${path}: "mcp" is not an object`);
+  }
+  const servers = (mcp.servers ??= {});
+  if (
+    typeof servers !== "object" ||
+    servers === null ||
+    Array.isArray(servers)
+  ) {
+    throw new Error(`${path}: "mcp.servers" is not an object`);
+  }
+  const existing = servers.polymer;
+  if (
+    existing !== undefined &&
+    JSON.stringify(existing) !== JSON.stringify(desired)
+  ) {
+    throw new Error(
+      `${path} already defines a different "polymer" MCP server entry; ` +
+        "review it by hand or remove it, then rerun polymer-install",
+    );
+  }
+  servers.polymer = desired;
+  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
+  return path;
+}
+
+function writeClientConfig(dir, server, client) {
+  return client === "claude"
+    ? writeMcpJson(dir, server, client)
+    : writeOpencodeConfig(dir);
+}
+
+function agentsMdBlock(server) {
+  return [
+    "<!-- polymer:start -->",
+    "## Polymer fleet MCP (managed by polymer-install)",
+    "",
+    `A \`polymer\` MCP server is preconfigured for this repo (${server}/mcp).`,
+    "",
+    "- Use the polymer MCP tools for fleet coordination (ping, get_tasks,",
+    "  claim_task, send_heartbeat, post_comment). Do not hand-roll HTTP",
+    "  clients against the server.",
+    "- Calls authenticate from `.polymrc` automatically (OpenCode runs a",
+    "  stdio bridge, `polymer-proxy`; no secrets in config, env, or argv).",
+    "  Never paste, log, or commit its contents.",
+    "- Read-only connectivity check: `polymer-status`.",
+    "<!-- polymer:end -->",
+  ].join("\n");
+}
+
+/**
+ * Append (or refresh, between exact markers) the Polymer section in
+ * the target repo's AGENTS.md so an unprimed agent discovers the
+ * managed connection without being told in a prompt.
+ */
+function ensureAgentsMd(dir, server) {
+  const path = join(dir, "AGENTS.md");
+  const block = agentsMdBlock(server);
+  const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const re = /<!-- polymer:start -->[\s\S]*?<!-- polymer:end -->/;
+  const match = existing.match(re);
+  if (match) {
+    if (match[0] === block) return false;
+    writeFileSync(path, existing.replace(re, block));
+    return true;
+  }
+  const prefix =
+    existing === "" || existing.endsWith("\n\n")
+      ? ""
+      : existing.endsWith("\n")
+        ? "\n"
+        : "\n\n";
+  writeFileSync(path, `${existing}${prefix}${block}\n`);
+  return true;
+}
+
 function ensureGitignore(dir) {
   const path = join(dir, ".gitignore");
   const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
@@ -184,7 +339,13 @@ async function main() {
     typeof stored?.session_token === "string" &&
     (await pingOk(server, mcpPath, stored.session_token))
   ) {
-    writeMcpJson(dir, server, client);
+    let configPath;
+    try {
+      configPath = writeClientConfig(dir, server, client);
+      ensureAgentsMd(dir, server);
+    } catch (err) {
+      fail(1, err.message);
+    }
     const gitignoreTouched = ensureGitignore(dir);
     console.log(
       JSON.stringify({
@@ -194,6 +355,8 @@ async function main() {
         agent: name,
         agent_id: stored.agent_id,
         dir,
+        config: configPath,
+        env_var: "POLYMER_SESSION_TOKEN",
         gitignore_touched: gitignoreTouched,
       }),
     );
@@ -229,7 +392,13 @@ async function main() {
   };
   writeFileSync(rcPath, `${JSON.stringify(rc, null, 2)}\n`, { mode: 0o600 });
   chmodSync(rcPath, 0o600);
-  writeMcpJson(dir, server, client);
+  let configPath;
+  try {
+    configPath = writeClientConfig(dir, server, client);
+    ensureAgentsMd(dir, server);
+  } catch (err) {
+    fail(1, err.message);
+  }
   const gitignoreTouched = ensureGitignore(dir);
   // Identifiers only on stdout — secrets stay in `.polymrc`.
   console.log(
@@ -240,6 +409,8 @@ async function main() {
       agent: name,
       agent_id: enrolled.agent_id,
       dir,
+      config: configPath,
+      env_var: "POLYMER_SESSION_TOKEN",
       gitignore_touched: gitignoreTouched,
     }),
   );
