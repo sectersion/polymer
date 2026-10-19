@@ -40,6 +40,7 @@ Agents (any MCP-capable runner) ── MCP + OTLP ──▶ Polymer Server ─�
 - [Design doc](polymer_fleet_management_design_bringup.md) — normative spec, wins on conflict.
 - [Docs index](docs/README.md) — workflow, skill plan, human overview.
 - [Agent skill](packages/skill/SKILL.md) — lifecycle, telemetry, rotation.
+- [Contributing](CONTRIBUTING.md) — quickstart → verify → first PR.
 
 ## License
 
