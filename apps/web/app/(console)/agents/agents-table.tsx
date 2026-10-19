@@ -58,7 +58,9 @@ const columns = [
           aria-hidden="true"
           className={`inline-block h-2 w-2 rounded-full ${STATUS_DOT[info.getValue()] ?? "bg-gray-300"}`}
         />
-        <span aria-hidden="true">{STATUS_ICON[info.getValue()] ?? "\u25cb"}</span>
+        <span aria-hidden="true">
+          {STATUS_ICON[info.getValue()] ?? "\u25cb"}
+        </span>
         {info.getValue()}
       </span>
     ),

@@ -1,6 +1,8 @@
-# CI: verify everything on every push and PR. Docker images are
-# built (not pushed) here so Dockerfile breakage fails the PR;
-# pushing to GHCR happens in release.yml.
+# CI: verify everything on every push and PR, split into parallel jobs
+# so failures surface fast and independently. Test jobs run as a
+# matrix (package × Node version); coverage is report-only.
+# Docker images are built (not pushed) here so Dockerfile breakage
+# fails the PR; pushing to GHCR happens in release.yml.
 name: ci
 
 on:
@@ -8,10 +10,14 @@ on:
     branches: ["**"]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow_ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  verify:
+  quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,23 +28,68 @@ jobs:
       - run: pnpm build
       - run: pnpm lint
       - run: pnpm typecheck
-      - run: pnpm --filter @polymer/server test
-      - run: pnpm --filter @polymer/web test
+      - run: pnpm format:check
+
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [server, web]
+        node: [22, 24]
+        exclude:
+          # Web is plain Next.js; one Node version is enough.
+          - package: web
+            node: 24
+        include:
+          # Report-only coverage on the primary server run.
+          - package: server
+            node: 22
+            coverage: true
+    name: tests (${{ matrix.package }}, node ${{ matrix.node }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm --filter @polymer/${{ matrix.package }} test
+      - run: pnpm --filter @polymer/server exec vitest run --coverage
+        if: matrix.coverage == true
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    name: e2e (fleet)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
       - run: pnpm e2e:fleet
 
   docker:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: server
+            dockerfile: apps/server/Dockerfile
+          - name: web
+            dockerfile: apps/web/Dockerfile
+    name: docker (${{ matrix.name }})
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: apps/server/Dockerfile
-          push: false
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: apps/web/Dockerfile
+          file: ${{ matrix.dockerfile }}
           push: false

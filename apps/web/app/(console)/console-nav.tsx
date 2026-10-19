@@ -45,8 +45,7 @@ export function ConsoleNav(): React.JSX.Element {
         const active =
           item.href === "/"
             ? pathname === "/"
-            : pathname === item.href ||
-              pathname.startsWith(`${item.href}/`);
+            : pathname === item.href || pathname.startsWith(`${item.href}/`);
         return (
           <Link
             key={item.href}

@@ -19,9 +19,7 @@ export const ADMIN_COOKIE_HTTP = "polymer_admin";
 /** The administrator session token from the browser cookie, if any. */
 export async function sessionToken(): Promise<string | undefined> {
   const jar = await cookies();
-  return (
-    jar.get(ADMIN_COOKIE)?.value ?? jar.get(ADMIN_COOKIE_HTTP)?.value
-  );
+  return jar.get(ADMIN_COOKIE)?.value ?? jar.get(ADMIN_COOKIE_HTTP)?.value;
 }
 
 export interface BackendError {

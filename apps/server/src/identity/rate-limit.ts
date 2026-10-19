@@ -173,8 +173,11 @@ export function resolveRateLimitIp(
   trustedProxies: string[] = [],
 ): string {
   const fallback = socketIp ?? "unknown";
-  if (trustedProxies.length === 0 || forwardedFor === undefined) return fallback;
-  const raw = Array.isArray(forwardedFor) ? forwardedFor.join(",") : forwardedFor;
+  if (trustedProxies.length === 0 || forwardedFor === undefined)
+    return fallback;
+  const raw = Array.isArray(forwardedFor)
+    ? forwardedFor.join(",")
+    : forwardedFor;
   const chain = raw
     .split(",")
     .map((s) => s.trim().replace(/^\[|\]$/g, ""))
