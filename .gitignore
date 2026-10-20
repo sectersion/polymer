@@ -11,3 +11,9 @@ pnpm-debug.log*
 # Next.js generated
 apps/web/next-env.d.ts
 apps/web/.next/
+
+# Playwright generated
+test-results/
+playwright-report/
+apps/web/test-results/
+apps/web/playwright-report/

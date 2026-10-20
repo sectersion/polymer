@@ -1,6 +1,6 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 const WEB_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -19,5 +19,8 @@ export default defineConfig({
     // so test files must never build for themselves. Each file still
     // boots its own backend + `next start` on ephemeral ports.
     globalSetup: [join(WEB_DIR, "tests", "setup-build.ts")],
+    // Playwright drives `tests/e2e/*` (browser smoke, own runner +
+    // its own CI job): never hand the browser spec to vitest.
+    exclude: [...configDefaults.exclude, "tests/e2e/**"],
   },
 });

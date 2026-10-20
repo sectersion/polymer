@@ -5,6 +5,7 @@
   "scripts": {
     "build": "next build",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "start": "next start",
@@ -26,6 +27,7 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
+    "@playwright/test": "^1.64.1",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
