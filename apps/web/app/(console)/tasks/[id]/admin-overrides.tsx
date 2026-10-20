@@ -57,7 +57,7 @@ export function AdminOverrides({
   };
 
   return (
-    <div className="mt-6 rounded-lg border border-(--color-hairline) bg-white p-4">
+    <div className="mt-6 rounded-lg border border-(--color-hairline) bg-(--color-card) p-4">
       <h2 className="font-medium">
         Admin overrides (lease-bypassing, audit-logged)
       </h2>
@@ -78,7 +78,7 @@ export function AdminOverrides({
               postJSON(`/api/tasks/${task.task_id}/claim`, { force }),
             )
           }
-          className="rounded-md border border-(--color-hairline) px-3 py-1 text-sm hover:bg-gray-50 disabled:opacity-50"
+          className="rounded-md border border-(--color-hairline) px-3 py-1 text-sm hover:bg-(--color-subtle) disabled:opacity-50"
         >
           Force-claim
         </button>
@@ -94,7 +94,7 @@ export function AdminOverrides({
               }),
             )
           }
-          className="rounded-md border border-(--color-hairline) px-3 py-1 text-sm hover:bg-gray-50 disabled:opacity-50"
+          className="rounded-md border border-(--color-hairline) px-3 py-1 text-sm hover:bg-(--color-subtle) disabled:opacity-50"
         >
           Patch status
         </button>
@@ -133,7 +133,7 @@ export function AdminOverrides({
               }),
             )
           }
-          className="rounded-md border border-(--color-hairline) px-3 py-1 text-sm hover:bg-gray-50 disabled:opacity-50"
+          className="rounded-md border border-(--color-hairline) px-3 py-1 text-sm hover:bg-(--color-subtle) disabled:opacity-50"
         >
           Assign
         </button>
@@ -155,7 +155,7 @@ export function AdminOverrides({
               }),
             )
           }
-          className="rounded-md border border-(--color-hairline) px-3 py-1 text-sm hover:bg-gray-50 disabled:opacity-50"
+          className="rounded-md border border-(--color-hairline) px-3 py-1 text-sm hover:bg-(--color-subtle) disabled:opacity-50"
         >
           Transfer
         </button>

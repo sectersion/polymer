@@ -48,11 +48,11 @@ export default async function AgentDetailPage({
         {agent.name}
       </h1>
       <dl className="mt-4 grid max-w-lg grid-cols-2 gap-2 text-sm">
-        <dt className="text-gray-500">Role</dt>
+        <dt className="text-(--color-fg-muted)">Role</dt>
         <dd>{agent.role}</dd>
-        <dt className="text-gray-500">Status</dt>
+        <dt className="text-(--color-fg-muted)">Status</dt>
         <dd>{agent.status}</dd>
-        <dt className="text-gray-500">Parent</dt>
+        <dt className="text-(--color-fg-muted)">Parent</dt>
         <dd>
           {parent ? (
             <Link
@@ -68,7 +68,7 @@ export default async function AgentDetailPage({
       </dl>
       <h2 className="mt-6 text-lg font-medium">Children</h2>
       {children.length === 0 ? (
-        <p className="text-sm text-gray-500">None.</p>
+        <p className="text-sm text-(--color-fg-muted)">None.</p>
       ) : (
         <ul className="list-disc pl-5 text-sm">
           {children.map((c) => (
@@ -85,7 +85,7 @@ export default async function AgentDetailPage({
       )}
       <h2 className="mt-6 text-lg font-medium">Coordinated tasks</h2>
       {owned.length === 0 ? (
-        <p className="text-sm text-gray-500">None.</p>
+        <p className="text-sm text-(--color-fg-muted)">None.</p>
       ) : (
         <ul className="list-disc pl-5 text-sm">
           {owned.map((t) => (
@@ -96,7 +96,7 @@ export default async function AgentDetailPage({
               >
                 {t.title}
               </Link>{" "}
-              <span className="text-gray-500">({t.status})</span>
+              <span className="text-(--color-fg-muted)">({t.status})</span>
             </li>
           ))}
         </ul>

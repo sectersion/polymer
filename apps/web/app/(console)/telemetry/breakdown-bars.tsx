@@ -15,10 +15,10 @@ export function BreakdownRow({
 }): React.JSX.Element {
   return (
     <div className="flex items-center gap-3 py-1">
-      <div className="w-40 shrink-0 truncate font-mono text-xs text-gray-500">
+      <div className="w-40 shrink-0 truncate font-mono text-xs text-(--color-fg-muted)">
         {label}
       </div>
-      <div className="h-4 flex-1 rounded bg-gray-100">
+      <div className="h-4 flex-1 rounded bg-(--color-subtle-strong)">
         <div
           className="h-4 rounded bg-(--color-accent)"
           style={{ width: `${peak > 0 ? (value / peak) * 100 : 0}%` }}
@@ -45,7 +45,9 @@ export function BreakdownSection({
       <h2 className="mt-8 text-lg font-semibold">{title}</h2>
       <div className="mt-2 rounded-lg border border-(--color-hairline) bg-(--color-card) p-5 shadow-sm">
         {buckets.length === 0 ? (
-          <div className="text-sm text-gray-500">No usage recorded.</div>
+          <div className="text-sm text-(--color-fg-muted)">
+            No usage recorded.
+          </div>
         ) : (
           buckets.map((bucket) => (
             <BreakdownRow

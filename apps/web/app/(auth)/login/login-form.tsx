@@ -39,14 +39,16 @@ export function LoginForm(): React.JSX.Element {
           value={secret}
           onChange={(e) => setSecret(e.target.value)}
           autoComplete="off"
-          className="mt-1 block w-full rounded-md border border-(--color-hairline) bg-white px-3 py-2 font-mono text-sm"
+          className="mt-1 block w-full rounded-md border border-(--color-hairline) bg-(--color-card) px-3 py-2 font-mono text-sm"
         />
       </label>
-      {error !== null && <p className="text-sm text-red-600">{error}</p>}
+      {error !== null && (
+        <p className="text-sm text-(--color-danger)">{error}</p>
+      )}
       <button
         type="submit"
         disabled={busy || secret === ""}
-        className="rounded-md bg-(--color-accent) px-4 py-2 text-sm font-medium text-white hover:bg-(--color-accent-emphasis) disabled:opacity-50"
+        className="rounded-md bg-(--color-accent) px-4 py-2 text-sm font-medium text-(--color-on-accent) hover:bg-(--color-accent-emphasis) disabled:opacity-50"
       >
         Log in
       </button>

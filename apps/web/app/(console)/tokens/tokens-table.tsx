@@ -26,7 +26,7 @@ function RevokeButton({ id }: { id: string }): React.JSX.Element {
       type="button"
       onClick={() => void revoke()}
       disabled={busy}
-      className="rounded-md border border-(--color-hairline) px-2 py-0.5 text-xs hover:bg-gray-50 disabled:opacity-50"
+      className="rounded-md border border-(--color-hairline) px-2 py-0.5 text-xs hover:bg-(--color-subtle) disabled:opacity-50"
     >
       Revoke
     </button>
@@ -81,7 +81,7 @@ export function TokensTable({
             {group.headers.map((header) => (
               <th
                 key={header.id}
-                className="px-4 py-2 text-left font-medium text-gray-500"
+                className="px-4 py-2 text-left font-medium text-(--color-fg-muted)"
               >
                 {flexRender(
                   header.column.columnDef.header,

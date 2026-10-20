@@ -21,7 +21,7 @@ export default function ConsoleLayout({
     <div className="min-h-screen">
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:z-20 focus:bg-white focus:px-3 focus:py-2"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-20 focus:bg-(--color-card) focus:px-3 focus:py-2"
       >
         Skip to main content
       </a>

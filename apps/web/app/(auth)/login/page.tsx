@@ -6,7 +6,7 @@ export default function LoginPage(): React.JSX.Element {
       <h1 className="text-xl font-semibold tracking-tight">
         Log in to Polymer
       </h1>
-      <p className="mt-1 text-sm text-gray-500">
+      <p className="mt-1 text-sm text-(--color-fg-muted)">
         Username-free: one password field for the master credential.
       </p>
       <LoginForm />

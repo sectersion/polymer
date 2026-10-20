@@ -33,7 +33,7 @@ export function FleetLive(): React.JSX.Element {
   return (
     <>
       <p
-        className="mt-4 inline-flex items-center gap-1.5 text-xs text-gray-500"
+        className="mt-4 inline-flex items-center gap-1.5 text-xs text-(--color-fg-muted)"
         data-testid="fleet-live"
         data-status={status}
       >
@@ -44,7 +44,7 @@ export function FleetLive(): React.JSX.Element {
               <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
             </>
           ) : (
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-gray-400" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-(--color-fg-subtle)" />
           )}
         </span>
         {STATUS_LABEL[status]}

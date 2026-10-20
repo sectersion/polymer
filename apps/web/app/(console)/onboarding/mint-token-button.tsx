@@ -86,16 +86,16 @@ export function MintTokenButton(): React.JSX.Element {
         type="button"
         onClick={() => void mint()}
         disabled={busy}
-        className="rounded-md bg-(--color-accent) px-4 py-2 text-sm font-medium text-white hover:bg-(--color-accent-emphasis) disabled:opacity-50"
+        className="rounded-md bg-(--color-accent) px-4 py-2 text-sm font-medium text-(--color-on-accent) hover:bg-(--color-accent-emphasis) disabled:opacity-50"
       >
         Mint init token
       </button>
       {token !== null && remaining > 0 && (
-        <div className="mt-4 max-w-md rounded-lg border border-(--color-hairline) bg-white p-4 shadow-sm">
-          <p className="text-sm text-gray-500">
+        <div className="mt-4 max-w-md rounded-lg border border-(--color-hairline) bg-(--color-card) p-4 shadow-sm">
+          <p className="text-sm text-(--color-fg-muted)">
             Expires in {remaining}s — a used or expired OTP is never reshown.
           </p>
-          <pre className="mt-2 overflow-x-auto rounded bg-gray-900 p-3 font-mono text-xs text-green-300">
+          <pre className="mt-2 overflow-x-auto rounded bg-(--color-code-bg) p-3 font-mono text-xs text-(--color-code-fg)">
             {prompt}
           </pre>
         </div>

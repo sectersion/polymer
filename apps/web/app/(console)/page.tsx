@@ -33,7 +33,7 @@ function Card({
       href={href}
       title={title}
     >
-      <div className="text-sm text-gray-500">{label}</div>
+      <div className="text-sm text-(--color-fg-muted)">{label}</div>
       <div className="mt-1 text-3xl font-semibold tabular-nums">{value}</div>
     </Link>
   );

@@ -52,7 +52,7 @@ export function ConsoleNav(): React.JSX.Element {
             href={item.href}
             aria-current={active ? "page" : undefined}
             title={`${item.label} (Γîÿ${index + 1})`}
-            className={`text-gray-600 hover:text-(--color-accent) ${FOCUS_RING} ${active ? "font-semibold text-black" : ""}`}
+            className={`text-(--color-fg-muted) hover:text-(--color-accent) ${FOCUS_RING} ${active ? "font-semibold text-(--color-fg)" : ""}`}
           >
             {item.label}
           </Link>

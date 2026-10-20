@@ -28,7 +28,7 @@ export function CostSparkline({
       data-testid="fleet-cost-spark"
       title={microUsdTooltip(total)}
     >
-      <div className="text-sm text-gray-500">7-day cost</div>
+      <div className="text-sm text-(--color-fg-muted)">7-day cost</div>
       <div className="mt-1 text-2xl font-semibold">{formatUsd(total)}</div>
       {pts ? (
         <svg
@@ -45,7 +45,7 @@ export function CostSparkline({
           />
         </svg>
       ) : (
-        <p className="mt-2 text-sm text-gray-500">No cost data yet</p>
+        <p className="mt-2 text-sm text-(--color-fg-muted)">No cost data yet</p>
       )}
     </Link>
   );
@@ -67,7 +67,7 @@ export function TaskDonut({ tasks }: { tasks: TaskItem[] }): React.JSX.Element {
       className="rounded-lg border border-(--color-hairline) bg-(--color-card) p-5 shadow-sm"
       data-testid="fleet-task-donut"
     >
-      <div className="text-sm text-gray-500">Tasks by status</div>
+      <div className="text-sm text-(--color-fg-muted)">Tasks by status</div>
       <div className="mt-2 flex items-center gap-4">
         <svg
           viewBox="0 0 42 42"
@@ -134,24 +134,24 @@ export function AgentStrip({
       className="rounded-lg border border-(--color-hairline) bg-(--color-card) p-5 shadow-sm"
       data-testid="fleet-agent-strip"
     >
-      <div className="text-sm text-gray-500">Agents</div>
+      <div className="text-sm text-(--color-fg-muted)">Agents</div>
       <ul className="mt-2 flex flex-wrap gap-2">
         {agents.map((a) => (
           <li key={a.agent_id}>
             <Link
               href={`/agents/${a.agent_id}`}
               title={microUsdTooltip(byId.get(a.agent_id)?.cost_micro_usd ?? 0)}
-              className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm hover:bg-gray-100"
+              className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm hover:bg-(--color-subtle-strong)"
             >
               <span
-                className={`inline-block h-2 w-2 rounded-full ${a.status === "active" ? "bg-green-500" : "bg-gray-400"}`}
+                className={`inline-block h-2 w-2 rounded-full ${a.status === "active" ? "bg-green-500" : "bg-(--color-fg-subtle)"}`}
               />
               {a.name}
             </Link>
           </li>
         ))}
         {agents.length === 0 && (
-          <li className="text-sm text-gray-500">No agents</li>
+          <li className="text-sm text-(--color-fg-muted)">No agents</li>
         )}
       </ul>
     </div>
@@ -168,7 +168,7 @@ export function RecentEvents({
       className="rounded-lg border border-(--color-hairline) bg-(--color-card) p-5 shadow-sm"
       data-testid="fleet-recent-events"
     >
-      <div className="text-sm text-gray-500">Recent events</div>
+      <div className="text-sm text-(--color-fg-muted)">Recent events</div>
       <ul className="mt-2 space-y-1 text-sm">
         {events.slice(0, 8).map((e) => (
           <li
@@ -188,13 +188,13 @@ export function RecentEvents({
                 {e.output_tokens ?? 0} tokens
               </Link>
             )}{" "}
-            <span className="text-gray-500">
+            <span className="text-(--color-fg-muted)">
               {new Date(e.recorded_at).toLocaleString()}
             </span>
           </li>
         ))}
         {events.length === 0 && (
-          <li className="text-gray-500">No events yet</li>
+          <li className="text-(--color-fg-muted)">No events yet</li>
         )}
       </ul>
     </div>

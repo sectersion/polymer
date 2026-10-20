@@ -88,8 +88,10 @@ function ToastItem({ toast }: { toast: Toast }): React.JSX.Element {
         transform: visible ? "translateY(0)" : "translateY(8px)",
         transition: "opacity 250ms ease-out, transform 250ms ease-out",
       }}
-      className={`pointer-events-auto w-full max-w-sm rounded-lg border bg-white p-3 shadow-lg ${
-        toast.kind === "error" ? "border-red-300" : "border-(--color-hairline)"
+      className={`pointer-events-auto w-full max-w-sm rounded-lg border bg-(--color-card) p-3 shadow-lg ${
+        toast.kind === "error"
+          ? "border-(--color-danger-border)"
+          : "border-(--color-hairline)"
       }`}
     >
       <div className="flex items-start gap-2">
@@ -98,13 +100,13 @@ function ToastItem({ toast }: { toast: Toast }): React.JSX.Element {
           type="button"
           aria-label="Dismiss"
           onClick={() => dismissToast(toast.id)}
-          className="rounded px-1 text-sm text-gray-400 hover:text-gray-700"
+          className="rounded px-1 text-sm text-(--color-fg-subtle) hover:text-(--color-fg-muted)"
         >
           ×
         </button>
       </div>
       {toast.copyText !== undefined && (
-        <pre className="mt-2 overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs break-all text-green-300">
+        <pre className="mt-2 overflow-x-auto rounded bg-(--color-code-bg) p-2 font-mono text-xs break-all text-(--color-code-fg)">
           {toast.copyText}
         </pre>
       )}
@@ -117,7 +119,7 @@ function ToastItem({ toast }: { toast: Toast }): React.JSX.Element {
                 toast.onAction?.();
                 dismissToast(toast.id);
               }}
-              className="rounded-md border border-(--color-hairline) px-2 py-1 text-xs font-medium hover:bg-gray-50"
+              className="rounded-md border border-(--color-hairline) px-2 py-1 text-xs font-medium hover:bg-(--color-subtle)"
             >
               {toast.actionLabel ?? "Undo"}
             </button>
@@ -128,7 +130,7 @@ function ToastItem({ toast }: { toast: Toast }): React.JSX.Element {
               onClick={() =>
                 void copyText(toast.copyText ?? "").then((ok) => setCopied(ok))
               }
-              className="rounded-md border border-(--color-hairline) px-2 py-1 text-xs font-medium hover:bg-gray-50"
+              className="rounded-md border border-(--color-hairline) px-2 py-1 text-xs font-medium hover:bg-(--color-subtle)"
             >
               {copied ? "Copied" : "Copy"}
             </button>
