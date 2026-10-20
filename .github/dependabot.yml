@@ -1,0 +1,57 @@
+# Dependabot config (issue #91): the dependency check is declared,
+# tuned, and reviewable like everything else — schedule, grouping, and
+# labels are the repo's choice, not GitHub's invisible defaults.
+#
+# Grouping follows the review-rhythm principle: minors and patches are
+# safe churn and land as one `chore:` PR each week; majors stay
+# individual because they need real review (eslint 10 / typescript 7
+# territory, issue #32).
+#
+#   npm   - weekly (Monday), one grouped PR, `dependencies` label
+#   gha   - weekly (Monday), one grouped PR, `dependencies` label
+#
+# No auto-merge anywhere: every PR goes through the working-agreement
+# review loop before merging.
+#
+# Docker updates are deliberately off: our Dockerfiles are minimal
+# (node-slim base only); revisit if they grow beyond the base image.
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: "Etc/UTC"
+    groups:
+      regular:
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+    # App-internal workspaces (@polymer/*) are excluded automatically —
+    # dependabot only reports updates it can resolve to a registry.
+    commit-message:
+      prefix: chore
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: "Etc/UTC"
+    groups:
+      actions:
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+    commit-message:
+      prefix: ci
+      include: scope
