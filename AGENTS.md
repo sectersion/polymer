@@ -38,6 +38,9 @@ Normative spec: `polymer_fleet_management_design_bringup.md`. Design doc wins on
    Label at creation: `bug` | `enhancement` | `documentation`
    (+ `good first issue` / `contributor request` where applicable).
    A vague one-liner gets a plan comment on the issue before work starts.
+   Cezar is wired up on this repo: adding the `needs-agent` label to an
+   issue hands it to Cezar, which tackles it through this same workflow
+   (plan, branch, PR, review).
 1. **Plan on the issue.** One behavior, files to touch, explicit
    out-of-scope, test/evidence strategy, applicable review skills.
    Lock decisions before coding.
