@@ -73,6 +73,26 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm e2e:fleet
 
+  # Browser smoke for the admin console (issue #43): its own job, not
+  # the tests matrix, so the slow Playwright browser download never
+  # gates unit-test feedback. No artifacts uploaded on purpose: a
+  # saved trace would contain the master credential and the minted
+  # OTP; the list reporter plus fixture stderr tails are the evidence.
+  web-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    name: e2e (web smoke)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm --filter @polymer/web exec playwright install chromium --with-deps
+      - run: pnpm e2e:web
+
   docker:
     runs-on: ubuntu-latest
     timeout-minutes: 20
