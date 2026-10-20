@@ -22,7 +22,7 @@ const columnsHelper = createColumnHelper<Agent>();
 const STATUS_DOT: Record<string, string> = {
   idle: "bg-green-500",
   working: "bg-blue-500",
-  error: "bg-(--color-danger-bg)0",
+  error: "bg-(--color-danger)",
   disabled: "bg-(--color-fg-subtle)",
 };
 
