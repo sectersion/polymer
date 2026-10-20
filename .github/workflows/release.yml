@@ -97,6 +97,22 @@ jobs:
             cd "$1"
             docker compose pull
             docker compose up -d --remove-orphans
+            # Health-gate (#80): the deploy succeeds only when the
+            # freshly pulled server answers /health on its published
+            # loopback port (compose maps 127.0.0.1:8080). A broken
+            # server must finish as a red job, not a green one.
+            command -v curl >/dev/null || { echo "deploy failed: curl is required on the host" >&2; exit 1; }
+            deadline=$((SECONDS + 60))
+            until curl -fsS --max-time 2 http://127.0.0.1:8080/health >/dev/null; do
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "deploy failed: server not healthy within 60s" >&2
+                docker compose ps >&2
+                docker compose logs --tail 50 >&2
+                exit 1
+              fi
+              sleep 2
+            done
+            echo "deploy healthy: $(curl -fsS http://127.0.0.1:8080/health)"
             # Drop only this project's dangling (replaced :sha) images.
             # Never prune other workloads' images on a shared host.
             docker image ls -f dangling=true --format '{{.Repository}} {{.ID}}' \
