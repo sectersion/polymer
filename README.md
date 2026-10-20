@@ -35,6 +35,14 @@ Agents pull work instead of waiting for it: heartbeat for liveness, claim a task
 Agents (any MCP-capable runner) ── MCP + OTLP ──▶ Polymer Server ── REST ──▶ Web UI
 ```
 
+## Roadmap
+
+What's next, in priority order:
+
+- **Fleet runtime v2** — the closed loop: release → deploy → operate → observe, resident agents working the backlog AI-driving-AI ([#47](https://github.com/sectersion/polymer/issues/47), [#46](https://github.com/sectersion/polymer/issues/46), [#39](https://github.com/sectersion/polymer/issues/39))
+- **Deploy-automated releases** — every merge lands on the host, health-gated; the pipeline (health gate #80, pinned host key #81) is built — what's left is wiring the target machine ([#76](https://github.com/sectersion/polymer/issues/76))
+- **Ecosystem** — GitHub/Linear sync, webhooks, notification bots ([#54](https://github.com/sectersion/polymer/issues/54))
+
 ## Docs
 
 - [Design doc](polymer_fleet_management_design_bringup.md) — normative spec, wins on conflict.
