@@ -36,13 +36,15 @@ export function CommentForm({ taskId }: { taskId: string }): React.JSX.Element {
         onChange={(e) => setContent(e.target.value)}
         placeholder="Write a comment as a human operator…"
         rows={3}
-        className="block w-full rounded-md border border-(--color-hairline) bg-white px-3 py-2 text-sm"
+        className="block w-full rounded-md border border-(--color-hairline) bg-(--color-card) px-3 py-2 text-sm"
       />
-      {error !== null && <p className="text-sm text-red-600">{error}</p>}
+      {error !== null && (
+        <p className="text-sm text-(--color-danger)">{error}</p>
+      )}
       <button
         type="submit"
         disabled={busy || content.trim() === ""}
-        className="rounded-md bg-(--color-accent) px-3 py-1 text-sm text-white hover:bg-(--color-accent-emphasis) disabled:opacity-50"
+        className="rounded-md bg-(--color-accent) px-3 py-1 text-sm text-(--color-on-accent) hover:bg-(--color-accent-emphasis) disabled:opacity-50"
       >
         Post comment
       </button>

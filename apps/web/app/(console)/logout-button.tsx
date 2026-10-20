@@ -17,7 +17,7 @@ export function LogoutButton(): React.JSX.Element {
       type="button"
       onClick={() => void logout()}
       disabled={busy}
-      className="rounded-md border border-(--color-hairline) bg-white px-3 py-1 text-sm hover:bg-gray-50 disabled:opacity-50"
+      className="rounded-md border border-(--color-hairline) bg-(--color-card) px-3 py-1 text-sm hover:bg-(--color-subtle) disabled:opacity-50"
     >
       Logout
     </button>

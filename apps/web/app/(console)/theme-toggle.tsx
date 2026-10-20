@@ -19,7 +19,7 @@ export function ThemeToggle(): React.JSX.Element {
     <div
       role="radiogroup"
       aria-label="Color theme"
-      className="flex rounded-md border border-(--color-hairline) bg-white p-0.5 text-sm"
+      className="flex rounded-md border border-(--color-hairline) bg-(--color-card) p-0.5 text-sm"
     >
       {OPTIONS.map((option) => {
         const checked = current === option.value;
@@ -33,7 +33,9 @@ export function ThemeToggle(): React.JSX.Element {
             aria-label={`${option.label} theme`}
             onClick={() => setTheme(option.value)}
             className={`rounded px-2 py-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--color-accent) ${
-              checked ? "bg-gray-200 font-semibold" : "hover:bg-gray-50"
+              checked
+                ? "bg-(--color-subtle-strong) font-semibold"
+                : "hover:bg-(--color-subtle)"
             }`}
           >
             <span aria-hidden="true">{option.icon}</span> {option.label}

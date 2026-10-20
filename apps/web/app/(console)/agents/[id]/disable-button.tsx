@@ -45,18 +45,18 @@ export function DisableButton({
       <Dialog.Trigger asChild>
         <button
           type="button"
-          className="rounded-md border border-red-300 bg-white px-3 py-1 text-sm text-red-700 hover:bg-red-50"
+          className="rounded-md border border-(--color-danger-border) bg-(--color-card) px-3 py-1 text-sm text-(--color-danger) hover:bg-(--color-danger-bg)"
         >
           Disable subtree
         </button>
       </Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-black/30" />
-        <Dialog.Content className="fixed left-1/2 top-1/3 w-full max-w-sm -translate-x-1/2 rounded-lg bg-white p-6 shadow-xl">
+        <Dialog.Content className="fixed left-1/2 top-1/3 w-full max-w-sm -translate-x-1/2 rounded-lg bg-(--color-card) p-6 shadow-xl">
           <Dialog.Title className="text-lg font-semibold">
             Disable {agentName}?
           </Dialog.Title>
-          <Dialog.Description className="mt-2 text-sm text-gray-600">
+          <Dialog.Description className="mt-2 text-sm text-(--color-fg-muted)">
             This disables the agent and its whole subtree, releasing their task
             leases. The action is audit-logged.
           </Dialog.Description>
@@ -73,7 +73,7 @@ export function DisableButton({
               type="button"
               onClick={() => void disable()}
               disabled={busy}
-              className="rounded-md bg-red-600 px-3 py-1 text-sm text-white hover:bg-red-700 disabled:opacity-50"
+              className="rounded-md bg-(--color-danger-strong) px-3 py-1 text-sm text-(--color-on-accent) hover:bg-(--color-danger-strong) disabled:opacity-50"
             >
               Disable
             </button>

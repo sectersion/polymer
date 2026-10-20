@@ -22,8 +22,8 @@ const columnsHelper = createColumnHelper<Agent>();
 const STATUS_DOT: Record<string, string> = {
   idle: "bg-green-500",
   working: "bg-blue-500",
-  error: "bg-red-500",
-  disabled: "bg-gray-400",
+  error: "bg-(--color-danger-bg)0",
+  disabled: "bg-(--color-fg-subtle)",
 };
 
 const PAGE_SIZE = 10;
@@ -56,7 +56,7 @@ const columns = [
       <span className="inline-flex items-center gap-1.5 rounded-full border border-(--color-hairline) px-2 py-0.5">
         <span
           aria-hidden="true"
-          className={`inline-block h-2 w-2 rounded-full ${STATUS_DOT[info.getValue()] ?? "bg-gray-300"}`}
+          className={`inline-block h-2 w-2 rounded-full ${STATUS_DOT[info.getValue()] ?? "bg-(--color-fg-subtle)"}`}
         />
         <span aria-hidden="true">
           {STATUS_ICON[info.getValue()] ?? "\u25cb"}
@@ -69,7 +69,7 @@ const columns = [
     header: "ID",
     enableSorting: false,
     cell: (info) => (
-      <span className="font-mono text-xs text-gray-500">
+      <span className="font-mono text-xs text-(--color-fg-muted)">
         {info.getValue().slice(0, 8)}
       </span>
     ),
@@ -175,7 +175,7 @@ export function AgentsTable({
                   <th
                     key={header.id}
                     scope="col"
-                    className="px-4 py-2 text-left font-medium text-gray-500"
+                    className="px-4 py-2 text-left font-medium text-(--color-fg-muted)"
                   >
                     {header.column.getCanSort() ? (
                       <button
@@ -222,7 +222,7 @@ export function AgentsTable({
         </table>
       )}
       {pageCount > 1 && (
-        <div className="mt-2 flex items-center gap-3 text-sm text-gray-500">
+        <div className="mt-2 flex items-center gap-3 text-sm text-(--color-fg-muted)">
           <button
             type="button"
             onClick={() => table.previousPage()}

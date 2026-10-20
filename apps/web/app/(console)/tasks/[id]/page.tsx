@@ -40,15 +40,15 @@ export default async function TaskDetailPage({
         {task.title}
       </h1>
       <dl className="mt-4 grid max-w-lg grid-cols-2 gap-2 text-sm">
-        <dt className="text-gray-500">Status</dt>
+        <dt className="text-(--color-fg-muted)">Status</dt>
         <dd className="font-mono">{task.status}</dd>
-        <dt className="text-gray-500">Version</dt>
+        <dt className="text-(--color-fg-muted)">Version</dt>
         <dd className="font-mono">{task.version}</dd>
-        <dt className="text-gray-500">Lease generation</dt>
+        <dt className="text-(--color-fg-muted)">Lease generation</dt>
         <dd className="font-mono">{task.lease_generation}</dd>
-        <dt className="text-gray-500">Coordinator</dt>
+        <dt className="text-(--color-fg-muted)">Coordinator</dt>
         <dd className="font-mono text-xs">{task.coordinator}</dd>
-        <dt className="text-gray-500">Assigned to</dt>
+        <dt className="text-(--color-fg-muted)">Assigned to</dt>
         <dd className="font-mono text-xs">
           {task.assigned_to.join(", ") || "—"}
         </dd>
@@ -59,16 +59,16 @@ export default async function TaskDetailPage({
       <h2 className="mt-6 text-lg font-medium">
         Comments{" "}
         {task.has_more && (
-          <span className="text-sm text-gray-500">(latest 20)</span>
+          <span className="text-sm text-(--color-fg-muted)">(latest 20)</span>
         )}
       </h2>
       <ul className="mt-2 max-w-2xl space-y-3">
         {task.comments.map((c) => (
           <li
             key={c.comment_id}
-            className="rounded-md border border-(--color-hairline) bg-white p-3 text-sm"
+            className="rounded-md border border-(--color-hairline) bg-(--color-card) p-3 text-sm"
           >
-            <div className="font-mono text-xs text-gray-500">
+            <div className="font-mono text-xs text-(--color-fg-muted)">
               {c.sender_type === "human"
                 ? "human operator"
                 : c.sender_agent_id?.slice(0, 8)}{" "}

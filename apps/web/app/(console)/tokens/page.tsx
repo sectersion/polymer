@@ -7,7 +7,7 @@ export default async function TokensPage(): Promise<React.JSX.Element> {
   return (
     <div>
       <h1 className="text-2xl font-semibold tracking-tight">Tokens</h1>
-      <p className="mt-1 text-sm text-gray-500">
+      <p className="mt-1 text-sm text-(--color-fg-muted)">
         Credential metadata only — no secret material is ever rendered.
       </p>
       <TokensTable tokens={tokens} />

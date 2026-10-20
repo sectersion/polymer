@@ -9,19 +9,41 @@
   --font-mono:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
+  /* Semantic surfaces + foregrounds (light values live on :root via
+     @theme, dark overrides in .dark below). Dark mode is first-class:
+     the same token names resolve in both themes, so no component may
+     hardcode a light assumption — text and backgrounds pick a token,
+     not a raw gray. */
   --color-canvas: #f6f8fa;
   --color-card: #ffffff;
   --color-card-elevated: #ffffff;
   --color-hairline: #d0d7de;
   --color-accent: #0969da;
   --color-accent-emphasis: #0550ae;
+  --color-on-accent: #ffffff;
+
+  --color-fg: #1f2328;
+  --color-fg-muted: #57606a;
+  --color-fg-subtle: #8b949e;
+
+  --color-subtle: #f6f8fa;
+  --color-subtle-strong: #e8ebee;
+
+  --color-danger: #cf222e;
+  --color-danger-strong: #cf222e;
+  --color-danger-bg: #ffebe9;
+  --color-danger-border: #ff8182;
+
+  /* Immutable dark chips (code blocks): dark in both themes. */
+  --color-code-bg: #1f2328;
+  --color-code-fg: #7ee786;
 
   --blur-chrome: blur(20px) saturate(180%);
 }
 
 body {
   background-color: var(--color-canvas);
-  color: #1f2328;
+  color: var(--color-fg);
   font-family: var(--font-sans);
 }
 
@@ -30,11 +52,26 @@ body {
   --color-card: #161b22;
   --color-card-elevated: #1c2128;
   --color-hairline: #30363d;
+  --color-accent: #1f6feb;
+  --color-accent-emphasis: #316dca;
+  --color-on-accent: #ffffff;
+
+  --color-fg: #e6edf3;
+  --color-fg-muted: #8b949e;
+  --color-fg-subtle: #6e7681;
+
+  --color-subtle: #21262d;
+  --color-subtle-strong: #30363d;
+
+  --color-danger: #ff6a69;
+  --color-danger-strong: #b62324;
+  --color-danger-bg: #67060c;
+  --color-danger-border: #a40e26;
 }
 
 .dark body {
   background-color: var(--color-canvas);
-  color: #e6edf3;
+  color: var(--color-fg);
 }
 
 /* HIG chrome: translucent backdrop-blur + saturate for headers. */
@@ -72,8 +109,5 @@ body {
   margin-top: 2px;
   font-size: 13px;
   line-height: 18px;
-  color: #57606a;
-}
-.dark .page-subtitle {
-  color: #8b949e;
+  color: var(--color-fg-muted);
 }

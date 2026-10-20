@@ -103,7 +103,7 @@ export function AgentTelemetryTable({ rows }: { rows: AgentTelemetryRow[] }) {
                 {group.headers.map((header) => (
                   <th
                     key={header.id}
-                    className="px-3 py-2 font-medium text-gray-500"
+                    className="px-3 py-2 font-medium text-(--color-fg-muted)"
                   >
                     <button
                       type="button"
@@ -140,7 +140,7 @@ export function AgentTelemetryTable({ rows }: { rows: AgentTelemetryRow[] }) {
         </table>
       )}
       {pageCount > 1 && (
-        <div className="flex items-center gap-3 p-1 text-sm text-gray-500">
+        <div className="flex items-center gap-3 p-1 text-sm text-(--color-fg-muted)">
           <button
             type="button"
             onClick={() => table.previousPage()}

@@ -23,7 +23,7 @@ const columns = [
   helper.accessor("recorded_at", {
     header: "Recorded",
     cell: (info) => (
-      <span className="font-mono text-xs text-gray-500">
+      <span className="font-mono text-xs text-(--color-fg-muted)">
         {info.getValue().slice(0, 19).replace("T", " ")}
       </span>
     ),
@@ -54,12 +54,12 @@ const columns = [
       info.getValue() ? (
         <a
           href={`/telemetry/trace/${info.getValue()}`}
-          className="font-mono text-xs text-gray-500 underline"
+          className="font-mono text-xs text-(--color-fg-muted) underline"
         >
           {info.getValue()?.slice(0, 8)}
         </a>
       ) : (
-        <span className="font-mono text-xs text-gray-500">—</span>
+        <span className="font-mono text-xs text-(--color-fg-muted)">—</span>
       ),
   }),
 ];
@@ -126,7 +126,7 @@ export function UsageTable({ events }: { events: TimelineEventRow[] }) {
                 {group.headers.map((header) => (
                   <th
                     key={header.id}
-                    className="px-3 py-2 font-medium text-gray-500"
+                    className="px-3 py-2 font-medium text-(--color-fg-muted)"
                   >
                     {header.column.getCanSort() ? (
                       <button
@@ -170,7 +170,7 @@ export function UsageTable({ events }: { events: TimelineEventRow[] }) {
         </table>
       )}
       {pageCount > 1 && (
-        <div className="flex items-center gap-3 p-1 text-sm text-gray-500">
+        <div className="flex items-center gap-3 p-1 text-sm text-(--color-fg-muted)">
           <button
             type="button"
             onClick={() => table.previousPage()}

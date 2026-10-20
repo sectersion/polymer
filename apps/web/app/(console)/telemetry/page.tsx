@@ -12,7 +12,7 @@ import { UsageTable } from "./usage-table";
 function Card({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-(--color-hairline) bg-(--color-card) p-5 shadow-sm">
-      <div className="text-sm text-gray-500 dark:text-gray-400">{label}</div>
+      <div className="text-sm text-(--color-fg-muted)">{label}</div>
       <div className="mt-1 text-3xl font-semibold tabular-nums">{value}</div>
     </div>
   );
@@ -69,10 +69,10 @@ export default async function TelemetryPage(): Promise<React.JSX.Element> {
               key={bucket.bucket_start}
               className="flex items-center gap-3 py-1"
             >
-              <div className="w-28 shrink-0 font-mono text-xs text-gray-500 dark:text-gray-400">
+              <div className="w-28 shrink-0 font-mono text-xs text-(--color-fg-muted)">
                 {bucket.bucket_start.slice(0, 10)}
               </div>
-              <div className="h-4 flex-1 rounded bg-gray-100 dark:bg-gray-800">
+              <div className="h-4 flex-1 rounded bg-(--color-subtle-strong)">
                 <div
                   className="h-4 rounded bg-(--color-accent)"
                   style={{

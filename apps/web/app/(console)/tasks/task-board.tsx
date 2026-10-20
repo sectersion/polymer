@@ -52,14 +52,14 @@ function TaskCard({
       >
         {task.title}
       </Link>
-      <div className="mt-1 font-mono text-xs text-gray-500">
+      <div className="mt-1 font-mono text-xs text-(--color-fg-muted)">
         v{task.version} · gen {task.lease_generation}
       </div>
       <div className="mt-1 flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1 rounded-full border border-(--color-hairline) px-2 py-0.5 text-xs">
           <span aria-hidden="true">{badge.icon}</span> {badge.label}
         </span>
-        <label className="flex items-center gap-1 text-xs text-gray-600">
+        <label className="flex items-center gap-1 text-xs text-(--color-fg-muted)">
           <span aria-hidden="true">Move to…</span>
           <select
             value={task.status}
@@ -69,7 +69,7 @@ function TaskCard({
             }}
             onPointerDown={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
-            className={`rounded border border-(--color-hairline) bg-white px-1 py-0.5 text-xs ${FOCUS_RING}`}
+            className={`rounded border border-(--color-hairline) bg-(--color-card) px-1 py-0.5 text-xs ${FOCUS_RING}`}
           >
             {COLUMNS.map((status) => (
               <option key={status} value={status}>
@@ -98,15 +98,15 @@ function Column({
     <section
       ref={setNodeRef}
       aria-label={`${badge.label} column`}
-      className={`min-h-48 rounded-lg bg-gray-100/60 p-2 ${isOver ? "ring-2 ring-(--color-accent)" : ""}`}
+      className={`min-h-48 rounded-lg bg-(--color-subtle-strong)/60 p-2 ${isOver ? "ring-2 ring-(--color-accent)" : ""}`}
     >
-      <h2 className="px-1 py-1 font-mono text-xs font-semibold uppercase tracking-wide text-gray-500">
+      <h2 className="px-1 py-1 font-mono text-xs font-semibold uppercase tracking-wide text-(--color-fg-muted)">
         <span aria-hidden="true">{badge.icon}</span> {badge.label} (
         {tasks.length})
       </h2>
       <div className="space-y-2">
         {tasks.length === 0 ? (
-          <p className="rounded-md border border-dashed border-(--color-hairline) px-2 py-4 text-center text-xs text-gray-400">
+          <p className="rounded-md border border-dashed border-(--color-hairline) px-2 py-4 text-center text-xs text-(--color-fg-subtle)">
             No {status} tasks
           </p>
         ) : (
@@ -228,7 +228,7 @@ export function TaskBoard({
   return (
     <div>
       {tasks.length === 0 && (
-        <p className="rounded-lg border border-dashed border-(--color-hairline) bg-(--color-card) p-10 text-center text-sm text-gray-500 shadow-sm">
+        <p className="rounded-lg border border-dashed border-(--color-hairline) bg-(--color-card) p-10 text-center text-sm text-(--color-fg-muted) shadow-sm">
           No tasks yet — create one from the fleet dashboard or over MCP with
           create_task.
         </p>
