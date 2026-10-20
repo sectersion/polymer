@@ -21,9 +21,13 @@ export default defineConfig({
     // Navigation URL comes from globalSetup at test time (see below):
     // config-level `baseURL: process.env…` is evaluated before
     // globalSetup runs, so it is deliberately not used here.
-    trace: "retain-on-failure",
+    // No trace: retention would record the master credential fill and
+    // the minted OTP (secret material never leaves the ephemeral
+    // environment or lands in any artifact — see CI e2e-web job). The
+    // list reporter plus the fixture's stderr tails are the diagnostics.
+    trace: "off",
   },
   projects: [{ name: "chromium", use: { browserName: "chromium" } }],
-  reporter: process.env.CI ? "list" : "list",
+  reporter: "list",
   forbidOnly: Boolean(process.env.CI),
 });

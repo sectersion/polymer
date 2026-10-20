@@ -75,8 +75,9 @@ jobs:
 
   # Browser smoke for the admin console (issue #43): its own job, not
   # the tests matrix, so the slow Playwright browser download never
-  # gates unit-test feedback. Artifacts always upload so a red spec
-  # ships its trace.
+  # gates unit-test feedback. No artifacts uploaded on purpose: a
+  # saved trace would contain the master credential and the minted
+  # OTP; the list reporter plus fixture stderr tails are the evidence.
   web-e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20

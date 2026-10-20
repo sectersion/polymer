@@ -53,7 +53,23 @@ function killChild(child) {
   });
 }
 
-/** Reuse of the e2e fleet scenario's seeding approach (fleet.mjs). */
+/**
+ * Diagnostics for a boot that never went healthy: a masked stderr
+ * tail (the first-run master credential is replaced before printing —
+ * secrets never reach test output, even for a throwaway DB so a
+ * recognized credential string never lands in CI logs).
+ */
+function maskSecret(text) {
+  return text.replace(
+    /polymer master credential \(save it now; it is not shown again\): (\S+)/,
+    "polymer master credential: ***masked***",
+  );
+}
+function stderrTail(context, text) {
+  console.error(
+    `web:e2e ${context} stderr tail: ${maskSecret(text).slice(-2000)}`,
+  );
+}
 async function waitUntilReady(check, what, deadlineMs) {
   const deadline = Date.now() + deadlineMs;
   for (;;) {
@@ -120,7 +136,10 @@ export default async function globalSetup() {
     "server",
     15000,
   );
-  if (!master) fail("first-run master credential never appeared on stderr");
+  if (!master) {
+    stderrTail("server", stderr);
+    fail("first-run master credential never appeared on stderr");
+  }
 
   step = "boot-console";
   const web = spawn(process.execPath, [STANDALONE_ENTRY], {
@@ -137,19 +156,19 @@ export default async function globalSetup() {
   let webStderr = "";
   web.stderr.setEncoding("utf8");
   web.stderr.on("data", (chunk) => (webStderr += chunk));
-  await waitUntilReady(
-    async () => {
-      try {
-        return (await fetch(`${consoleUrl}/login`)).status === 200;
-      } catch {
-        return false;
-      }
-    },
-    "console",
-    60000,
-  );
-
   try {
+    await waitUntilReady(
+      async () => {
+        try {
+          return (await fetch(`${consoleUrl}/login`)).status === 200;
+        } catch {
+          return false;
+        }
+      },
+      "console",
+      60000,
+    );
+
     step = "seed-agent";
     const loginRes = await fetch(`${base}/api/auth/login`, {
       method: "POST",
@@ -226,7 +245,8 @@ export default async function globalSetup() {
       await killChild(web);
     };
   } catch (err) {
-    console.error(`web:e2e console stderr tail: ${webStderr.slice(-2000)}`);
+    stderrTail("server", stderr);
+    stderrTail("console", webStderr);
     await killChild(server);
     await killChild(web);
     throw err;
