@@ -138,3 +138,68 @@ jobs:
               | awk '$1 ~ /^ghcr.io\/sectersion\// {print $2}' \
               | xargs -r docker rmi
           REMOTE
+
+  # Release (#87): on a v* tag, publish a GitHub Release whose notes
+  # are the squash-merge subjects since the previous v* tag, grouped
+  # by the subject prefixes in force (feat: → Added, fix:/audit: →
+  # Fixed, anything else → Internal). Notes live on the Release
+  # object only — nothing is committed back to main, because main
+  # moves only by PR merge (working agreement). Runs after images so
+  # the tag's :version image tags exist by the time the Release is
+  # cut.
+  release:
+    needs: images
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create the release with notes from squash subjects
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "release failed: tag '$tag' is not vX.Y.Z" >&2; exit 1; }
+          prev="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -vx "$tag" | sort -V | tail -1 || true)"
+          if [ -n "$prev" ]; then
+            range="refs/tags/$prev..HEAD"
+          else
+            first="$(git rev-list --max-parents=0 HEAD | head -1)"
+            range="$first..HEAD"
+          fi
+          prefix="https://github.com/${GITHUB_REPOSITORY}"
+          added="$(mktemp)"; fixed="$(mktemp)"; internal="$(mktemp)"; notes="$(mktemp)"
+          trap 'rm -f "$added" "$fixed" "$internal" "$notes"' EXIT
+          git log --format='%s' "$range" | sort -u | while IFS= read -r subj; do
+            case "$subj" in
+              feat:*)         printf '%s\n' "$subj" >> "$added" ;;
+              fix:*|audit:*)  printf '%s\n' "$subj" >> "$fixed" ;;
+              *)              printf '%s\n' "$subj" >> "$internal" ;;
+            esac
+          done
+          emit() {
+            if [ -s "$2" ]; then
+              printf '### %s\n\n' "$1" >> "$notes"
+              sed -E "s|#([0-9]+)|[#\1](${prefix}/pull/\1)|g" "$2" | sed 's/^/- /' >> "$notes"
+              printf '\n' >> "$notes"
+            fi
+          }
+          emit "Added" "$added"
+          emit "Fixed" "$fixed"
+          if [ -s "$internal" ]; then
+            # Internal churn is stated, not hidden — but only as a count
+            # collapsed behind the compare link, never claiming novelty.
+            printf '### Internal\n\n- %d internal/docs/chore commits (see compare link below)\n\n' \
+              "$(wc -l < "$internal")" >> "$notes"
+          fi
+          if [ -n "$prev" ]; then
+            printf '**Full changelog:** %s/compare/%s...%s\n' "$prefix" "$prev" "$tag" >> "$notes"
+          fi
+          gh release create "$tag" --verify-tag \
+            --title "Polymer $tag" --notes-file "$notes"
