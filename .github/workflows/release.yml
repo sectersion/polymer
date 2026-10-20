@@ -53,9 +53,11 @@ jobs:
   # push must not redeploy a stale (previous) :latest, because
   # metadata-action does not push :latest for tags. Job is a no-op
   # until the DEPLOY_* secrets exist, so CI stays green before the
-  # host is set up. No credentials to mint beyond one SSH key for the
-  # host; the host needs bash + docker compose (provisioning itself is
-  # out of scope — see issue #76).
+  # host is set up. The deploy job now also carries DEPLOY_SSH_HOST_KEY
+  # (#81) so an unpinned host key can't be silently accepted. No
+  # credentials to mint beyond one SSH key + the host's key line
+  # (ssh-keyscan, see #76); the host needs curl, bash + docker compose
+  # (provisioning itself is out of scope — see issue #76).
   deploy:
     needs: images
     if: github.ref == 'refs/heads/main'
@@ -83,12 +85,29 @@ jobs:
           DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
           DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_HOST_KEY: ${{ secrets.DEPLOY_SSH_HOST_KEY }}
           DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
         run: |
           set -euo pipefail
-          key="$(mktemp)"; trap 'rm -f "$key"' EXIT
+          # Host-key pinning (#81): when DEPLOY_SSH_HOST_KEY is set the
+          # connection verifies against that key only — a changed host
+          # key fails the deploy instead of being silently accepted.
+          # Until the key is captured (ssh-keyscan on the host after
+          # first connect — see #76), fall back to trust-on-first-use
+          # with a loud warning; the invariant "never trusts an
+          # unpinned host" is fully in force only once the secret is
+          # set, and that gap is logged loudly here.
+          key="$(mktemp)"; kh="$(mktemp)"
+          trap 'rm -f "$key" "$kh"' EXIT
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$key"; chmod 600 "$key"
-          ssh_key_arg=(-i "$key" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
+          ssh_key_arg=(-i "$key" -o BatchMode=yes)
+          if [ -n "${DEPLOY_SSH_HOST_KEY:-}" ]; then
+            printf '%s %s\n' "$DEPLOY_SSH_HOST" "$DEPLOY_SSH_HOST_KEY" > "$kh"
+            ssh_key_arg+=(-o GlobalKnownHostsFile=/dev/null -o "UserKnownHostsFile=$kh" -o StrictHostKeyChecking=yes)
+          else
+            echo "WARNING: DEPLOY_SSH_HOST_KEY not set — using trust-on-first-use (accept-new); run ssh-keyscan on the host and set the secret (see #76)" >&2
+            ssh_key_arg+=(-o StrictHostKeyChecking=accept-new)
+          fi
           # The deploy dir is passed as a positional arg to `bash -s`,
           # never interpolated into the remote command text; the
           # single-quoted heredoc guarantees no local expansion.
