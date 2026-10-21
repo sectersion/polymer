@@ -112,7 +112,7 @@ jobs:
             type=raw,value=nightly
             type=raw,value=nightly-${{ needs.gate.outputs.date }}
             type=sha
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.dockerfile }}
