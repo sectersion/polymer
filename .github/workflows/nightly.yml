@@ -138,7 +138,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.gate.outputs.tag }}
           SHA: ${{ github.sha }}
-          DATE: ${{ needs.gate.outputs.date }}
           SUBJECTS: ${{ needs.gate.outputs.subjects }}
         run: |
           set -euo pipefail
@@ -160,10 +159,6 @@ jobs:
             local image="$1" digest
             digest="$(docker buildx imagetools inspect "ghcr.io/${owner}/${image}:${TAG}" \
               | grep '^Digest:' | awk '{print $2}')"
-            if [ -z "$digest" ]; then
-              echo "nightly failed: could not resolve digest for ${image}" >&2
-              return 1
-            fi
             if [ -z "$digest" ]; then
               echo "nightly failed: could not resolve digest for ${image}" >&2
               return 1
