@@ -1,0 +1,144 @@
+# Nightly (#110): every night after the working day's merges, the
+# fleet images are built, pushed to GHCR under dated `nightly-*` tags,
+# and a GitHub prerelease `(nightly-YYYYMMDD)` is cut — no human in
+# it. Nights with zero merges publish nothing: a green-but-explicit
+# skip keeps the run history honest instead of repainting an
+# identical release.
+#
+# Collision rules: the tag prefix is `nightly-`, which never matches
+# release.yml's `v*` trigger, and release.yml's release job demands
+# exact `vX.Y.Z` — so operator versions and nightlies never race.
+# Deploy is untouched: the fleet host only ever pulls `:latest`
+# published by main-merges (#76), never from a nightly run.
+name: nightly
+
+on:
+  schedule:
+    # 04:00 UTC daily — after the busiest merge window, before the
+    # dependabot Monday run (weekly, 06:00 UTC, #91).
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # Decide once, tell the others: a night with no merges since the
+  # last nightly tag ships nothing (an empty range release would
+  # duplicate a tag and lie about novelty).
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          date="$(date -u +%Y%m%d)"
+          tag="nightly-$date"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "ship=false (tag $tag already exists — rerun of the same night; skipping)" \
+              >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          prev="$(git tag -l 'nightly-*' | sort -V | tail -1 || true)"
+          range="${prev:+refs/tags/$prev..}HEAD"
+          count="$(git rev-list --count "$range")"
+          if [ "$count" = 0 ]; then
+            echo "ship=false (no merges since $prev; skipping)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ship=true" >> "$GITHUB_OUTPUT"
+          echo "date=$date" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          {
+            echo "subjects<<EOF"
+            git log --format='%h %s' "$range"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  # Same build matrix as release.yml (server, web), but tagged
+  # nightly: a rolling `nightly` plus the dated `nightly-YYYYMMDD`
+  # (and the sha tag every build carries, so any single bad night
+  # stays individually reachable). push: true — a nightly that never
+  # leaves the runner helps nobody.
+  images:
+    needs: gate
+    if: needs.gate.outputs.ship == 'true'
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: polymer-server
+            dockerfile: apps/server/Dockerfile
+          - name: polymer-web
+            dockerfile: apps/web/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
+          tags: |
+            type=raw,value=nightly
+            type=raw,value=nightly-${{ needs.gate.outputs.date }}
+            type=sha
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # Dated prerelease on a dated tag, naming its range and sha: the
+  # replaceable-by-design opposite of release.yml's version releases.
+  nightly:
+    needs: [gate, images]
+    if: needs.gate.outputs.ship == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag and cut the dated prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.gate.outputs.tag }}
+          SHA: ${{ github.sha }}
+          SUBJECTS: ${{ needs.gate.outputs.subjects }}
+        run: |
+          set -euo pipefail
+          git tag "$TAG" "$SHA"
+          git push origin "$TAG"
+          notes="$(mktemp)"
+          trap 'rm -f "$notes"' EXIT
+          {
+            printf 'Nightly build from %s.\n\n' "$SHA"
+            printf 'Dated and replaceable: prefer a real `v*` release for anything you keep.\n\n'
+            printf '**Images:** `ghcr.io/%s/polymer-server:%s`, `ghcr.io/%s/polymer-web:%s`\n\n' \
+              "$GITHUB_REPOSITORY_OWNER" "$TAG" "$GITHUB_REPOSITORY_OWNER" "$TAG"
+            if [ -n "${SUBJECTS:-}" ]; then
+              printf '### Merged since the last nightly\n\n'
+              printf '%s\n' "$SUBJECTS" | while IFS= read -r line; do printf -- '- %s\n' "$line"; done
+            fi
+          } > "$notes"
+          gh release create "$TAG" --verify-tag --prerelease \
+            --title "Polymer nightly ${TAG#nightly-}" --notes-file "$notes"
