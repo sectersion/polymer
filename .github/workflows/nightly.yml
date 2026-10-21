@@ -145,14 +145,50 @@ jobs:
           git push origin "$TAG"
           notes="$(mktemp)"
           trap 'rm -f "$notes"' EXIT
+          short="${SHA:0:7}"
+          anchor="$(git tag -l 'nightly-*' | grep -vx "$TAG" | sort -V | tail -1 \
+            || git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -1 || true)"
+          owner="$GITHUB_REPOSITORY_OWNER"
+          repo="$GITHUB_REPOSITORY"
+          prefix="https://github.com/${repo}"
+          # The digests exist only after the images job published —
+          # and the pull lines carry them, so what the notes state is
+          # what can actually be consumed. Never fabricated: they are
+          # read back from the registry here.
+          with_digest() {
+            local image="$1" digest
+            digest="$(docker buildx imagetools inspect "ghcr.io/${owner}/${image}:${TAG}" \
+              | grep '^Digest:' | awk '{print $2}')"
+            if [ -z "$digest" ]; then
+              echo "nightly failed: could not resolve digest for ${image}" >&2
+              return 1
+            fi
+            printf -- '- **%s** ([package](%s/packages/container/package/%s))\n\n  ```sh\n  docker pull ghcr.io/%s/%s:%s@%s\n  ```\n\n' \
+              "$image" "$prefix" "$image" "$owner" "$image" "$TAG" "$digest"
+          }
           {
-            printf 'Nightly build from %s.\n\n' "$SHA"
-            printf 'Dated and replaceable: prefer a real `v*` release for anything you keep.\n\n'
-            printf '**Images:** `ghcr.io/%s/polymer-server:%s`, `ghcr.io/%s/polymer-web:%s`\n\n' \
-              "$GITHUB_REPOSITORY_OWNER" "$TAG" "$GITHUB_REPOSITORY_OWNER" "$TAG"
+            printf 'Nightly build of `%s` (built by [ci](%s/actions/runs/%s)).\n\n' \
+              "$short" "$prefix" "$GITHUB_RUN_ID"
+            printf 'Dated and designed to be replaced: prefer a real `v*` release for anything kept.\n\n'
+            if [ -n "$anchor" ]; then
+              printf '**Changes:** [`%s...%s`](%s/compare/%s...%s)\n\n' \
+                "$anchor" "$short" "$prefix" "$anchor" "$SHA"
+            fi
+            printf '**Images (built from `%s`):**\n\n' "$short"
+            with_digest polymer-server
+            with_digest polymer-web
+            printf '\n'
+            printf '**Use:** pin the dated tag (`%s`) — `nightly` alone is a moving label. ' "$TAG"
+            printf 'For the hosted fleet, point compose at these tags; for local runs, docker compose up after the pull.\n\n'
             if [ -n "${SUBJECTS:-}" ]; then
-              printf '### Merged since the last nightly\n\n'
-              printf '%s\n' "$SUBJECTS" | while IFS= read -r line; do printf -- '- %s\n' "$line"; done
+              printf '### Merged since %s\n\n<details>\n<summary>%s merged commits (expand)</summary>\n\n' \
+                "${anchor:-the previous nightly}" "$(printf '%s\n' "$SUBJECTS" | wc -l)"
+              printf '%s\n' "$SUBJECTS" | while IFS= read -r line; do
+                sh="${line%% *}"
+                subj="${line#* }"
+                printf -- '- [`%s`](%s/commit/%s) %s\n' "$sh" "$prefix" "$sh" "$subj"
+              done
+              printf '\n</details>\n'
             fi
           } > "$notes"
           gh release create "$TAG" --verify-tag --prerelease \
