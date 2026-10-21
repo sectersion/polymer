@@ -23,9 +23,9 @@
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
     "globals": "^16.0.0",
-    "prettier": "^3.4.2",
-    "turbo": "^2.4.4",
+    "prettier": "^3.9.10",
+    "turbo": "^2.11.9",
     "typescript": "^5.7.3",
-    "typescript-eslint": "^8.20.0"
+    "typescript-eslint": "^8.71.2"
   }
 }
