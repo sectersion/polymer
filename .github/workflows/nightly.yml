@@ -32,13 +32,20 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+    # Step outputs exist for downstream jobs only through this
+    # (job-level) mapping — the reviewer caught their absence; without
+    # it, `needs.gate.outputs.*` is empty forever and the run would
+    # green-skip every night forever.
+    outputs:
+      ship: ${{ steps.decide.outputs.ship }}
+      date: ${{ steps.decide.outputs.date }}
+      tag: ${{ steps.decide.outputs.tag }}
+      subjects: ${{ steps.decide.outputs.subjects }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - id: decide
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           date="$(date -u +%Y%m%d)"
@@ -49,7 +56,15 @@ jobs:
             exit 0
           fi
           prev="$(git tag -l 'nightly-*' | sort -V | tail -1 || true)"
-          range="${prev:+refs/tags/$prev..}HEAD"
+          anchor="$prev"
+          # First night ever: anchor on the latest version tag instead
+          # of the repo's whole history, so "since the last nightly"
+          # reflects, at most, work newer than the last release.
+          last_v="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -1 || true)"
+          if [ -z "$anchor" ] && [ -n "$last_v" ]; then
+            anchor="$last_v"
+          fi
+          range="${anchor:+refs/tags/$anchor..}HEAD"
           count="$(git rev-list --count "$range")"
           if [ "$count" = 0 ]; then
             echo "ship=false (no merges since $prev; skipping)" >> "$GITHUB_OUTPUT"
@@ -59,9 +74,9 @@ jobs:
           echo "date=$date" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           {
-            echo "subjects<<EOF"
+            echo "subjects<<NIGHTLY_SUBJECTS_EOF"
             git log --format='%h %s' "$range"
-            echo "EOF"
+            echo "NIGHTLY_SUBJECTS_EOF"
           } >> "$GITHUB_OUTPUT"
 
   # Same build matrix as release.yml (server, web), but tagged
