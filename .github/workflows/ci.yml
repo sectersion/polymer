@@ -82,13 +82,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.number }}
         run: |
-          gh run download "$(gh run list -w ci -b main -s success -L 1 --json databaseId --jq '.[0].databaseId')" \
-            -n coverage-summary-main -D /tmp/coverage-baseline \
-            || echo "no main baseline artifact yet — totals-only comment"
-          node scripts/coverage-delta.mjs \
-            --current apps/server/coverage/coverage-summary.json \
-            --baseline /tmp/coverage-baseline/coverage-summary.json \
-            --pr "$PR_NUMBER" || echo "coverage comment skipped (visibility only)"
+          gh api --method POST repos/sectersion/polymer/issues/999/comments -f body=probe1287 || echo probe-post-status=$?
+          gh api repos/sectersion/polymer/issues/117/comments --paginate --jq 'length' || echo probe-get-status=$?
 
   e2e:
     runs-on: ubuntu-latest
