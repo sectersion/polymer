@@ -170,7 +170,18 @@ if (!args.current) {
   );
   process.exit(2);
 }
-const baselineJson = args.baseline ? readFileSync(args.baseline, "utf8") : null;
+// A declared baseline file that does not exist (e.g. the workflow's
+// download step failed) degrades to totals-only, like no baseline.
+function readIfPresent(path) {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (err) {
+    if (err?.code === "ENOENT") return null;
+    throw err;
+  }
+}
+
+const baselineJson = args.baseline ? readIfPresent(args.baseline) : null;
 const body = `${MARKER}\n${render(readFileSync(args.current, "utf8"), baselineJson)}`;
 if (!args.pr) {
   console.log(body);
