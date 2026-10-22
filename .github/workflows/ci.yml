@@ -33,12 +33,14 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    # Coverage ratchet comment (issue #42) upserts a sticky issue comment.
-    # Scoped grants only: job-level permissions deny everything not listed,
-    # and the step needs contents/read (checkout on private repos) and
-    # actions/read (gh run download from the main branch's run).
+    # Coverage ratchet comment (issue #42) upserts a sticky PR comment.
+    # Scoped grants only: job-level permissions deny everything not
+    # listed, and the step needs contents/read (checkout on private
+    # repos), actions/read (gh run download from the main run), and
+    # pull-requests/write — commenting on a PR is pull-requests, not
+    # just, issues.
     permissions:
-      issues: write
+      pull-requests: write
       contents: read
       actions: read
     strategy:
@@ -82,7 +84,13 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.number }}
         run: |
-          gh api --method POST repos/sectersion/polymer/issues/117/comments -f body="probe-comment-$$" || echo probe-pr-comment-status=$?
+          gh run download "$(gh run list -w ci -b main -s success -L 1 --json databaseId --jq '.[0].databaseId')" \
+            -n coverage-summary-main -D /tmp/coverage-baseline \
+            || echo "no main baseline artifact yet — totals-only comment"
+          node scripts/coverage-delta.mjs \
+            --current apps/server/coverage/coverage-summary.json \
+            --baseline /tmp/coverage-baseline/coverage-summary.json \
+            --pr "$PR_NUMBER" || echo "coverage comment skipped (visibility only)"
 
   e2e:
     runs-on: ubuntu-latest
