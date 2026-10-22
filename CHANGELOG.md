@@ -19,11 +19,12 @@ multi-agent workflows: an agent-side MCP daemon, a coordination server
 ### Coordination server (`@polymer/server`)
 
 - **Task leases with fencing tokens**: claim-concurrency safe; a stale
-  lease holder cannot reapply a write past a newer fence. Watchdog reaps
-  expired leases.
-- **REST API** with pagination and a documented error catalog
-  (`GET /health`, `/api/agents*`, `/api/tasks*`, `/api/events`,
-  `/api/telemetry/*`, `/api/audit`).
+  lease holder cannot reapply a write past a newer fence. A watchdog
+  emits `task.lease_expired`; expired leases are dead at claim-time
+  (the fencing guard), cleared on terminal states.
+- **REST API** (`GET /health`, `/api/agents*`, `/api/tasks*`,
+  `/api/events`, `/api/telemetry/*`, `/api/audit`) with pagination and
+  a per-code error catalog (`src/tasks/errors.ts`).
 - **OTel intake** (`POST <endpoint>/v1/traces`): trace/span-native IDs,
   queue-backed ingestion with retention; token usage recorded per agent
   in integer micro-USD.
