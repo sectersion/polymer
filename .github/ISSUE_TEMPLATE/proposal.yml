@@ -1,0 +1,43 @@
+name: "Proposal"
+description: "A change you want landed — arrive at least plan-shaped."
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues here are work orders, not wishes: every change lands as a
+        one-behavior PR bound to an issue with an invariant commit
+        subject. This form partially pre-fills that plan — vague
+        one-liners get a plan comment before any branch exists.
+  - type: textarea
+    id: one-line
+    attributes:
+      label: The idea in one line
+      placeholder: "Daily WAL-safe SQLite backup via VACUUM INTO."
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem it solves
+      description: What can't be done today? Keep it falsifiable, not aspirational.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Proposed behavior
+      description: >
+        The observable outcome claimed as an invariant — a falsifiable
+        behavior claim a reviewer can check ("X never happens, because Y").
+        Files expected to change, if known.
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Explicit out-of-scope
+      description: Names the things this issue deliberately does NOT do. One behavior per PR.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Test / evidence strategy
+      description: What proof step would demonstrate it — a command, a run, an exit code.

@@ -1,0 +1,58 @@
+name: "Report a bug"
+description: "Something breaks — arrive with a repro, not a screenshot of your feelings."
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing. Keep secrets out of logs — the polymer server
+        mints credentials, and `POLYMER.json` paths show up in stack
+        traces. Redact anything token-shaped before pasting.
+  - type: textarea
+    id: what-breaks
+    attributes:
+      label: What breaks
+      description: One or two sentences. The title above carries the short version.
+      placeholder: "`POST /api/tasks` returns 500 when claiming a leased task."
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Where it breaks — one pick.
+      options:
+        - server (REST/MCP/telemetry/SQLite)
+        - web (admin console)
+        - skill / installer scripts
+        - CI / build
+        - docs
+    validations:
+      required: true
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: Expected vs actual
+      placeholder: |
+        Expected: claim returns 409 (lease contention), task stays claimable after release.
+        Actual: 500 instead of 409.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Repro / evidence
+      description: >
+        The narrowest command and its observable result — exit code,
+        response body, log tail. Invariant-shaped if you can.
+      placeholder: |
+        $ pnpm --filter @polymer/server test -- lease
+        → 219 passed, then claim-concurrency test exits 1 without set -o pipefail.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Redact secrets first. A few lines beats a 400-line dump.
+      render: shell
