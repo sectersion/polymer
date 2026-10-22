@@ -33,10 +33,14 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    # Coverage ratchet comment (issue #42) upserts a sticky issue
-    # comment; the run itself needs nothing else from the token.
+    # Coverage ratchet comment (issue #42) upserts a sticky issue comment.
+    # Scoped grants only: job-level permissions deny everything not listed,
+    # and the step needs contents/read (checkout on private repos) and
+    # actions/read (gh run download from the main branch's run).
     permissions:
       issues: write
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:

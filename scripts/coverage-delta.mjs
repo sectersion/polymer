@@ -36,6 +36,9 @@ function fileRows(cur, base, strip) {
     const curPct = lines?.pct;
     if (curPct == null) continue;
     // json-summary keys are absolute; render repo-relative paths.
+    // `strip` is the repo root: process.cwd() in CI (correct), and the
+    // usual case locally too — a dry-run from elsewhere shows absolute
+    // paths, which is fine for eyeballing.
     const path =
       strip && absPath.startsWith(strip)
         ? absPath.slice(strip.length)
@@ -111,16 +114,33 @@ async function upsertComment({ repo, pr, body }) {
           );
         }),
     );
-  const existing = JSON.parse(
-    await gh([
-      "api",
-      `repos/${repo}/issues/${pr}/comments`,
-      "--paginate",
-      "--jq",
-      ".",
-    ]),
+  // --paginate concatenates per-page output, so request one JSON object
+  // per line instead of a single outer array (stays parseable past 30
+  // comments, the default page size).
+  const { stdout } = await import("node:child_process").then(
+    (cp) =>
+      new Promise((resolve, reject) => {
+        cp.execFile(
+          "gh",
+          [
+            "api",
+            "--paginate",
+            `repos/${repo}/issues/${pr}/comments`,
+            "--jq",
+            `{id: .id, mine: (.body | contains(${JSON.stringify(MARKER)}))} | tostring`,
+          ],
+          (err, out, stderr) =>
+            err
+              ? reject(new Error(stderr || err.message))
+              : resolve({ stdout: out }),
+        );
+      }),
   );
-  const prior = existing.find((c) => c.body?.includes(MARKER));
+  const prior = stdout
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line))
+    .find((c) => c.mine);
   if (prior) {
     await gh([
       "api",
