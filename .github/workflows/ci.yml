@@ -82,8 +82,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.number }}
         run: |
-          gh api --method POST repos/sectersion/polymer/issues/999/comments -f body=probe1287 || echo probe-post-status=$?
-          gh api repos/sectersion/polymer/issues/117/comments --paginate --jq 'length' || echo probe-get-status=$?
+          gh api --method POST repos/sectersion/polymer/issues/117/comments -f body="probe-comment-$$" || echo probe-pr-comment-status=$?
 
   e2e:
     runs-on: ubuntu-latest
