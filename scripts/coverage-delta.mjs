@@ -36,7 +36,10 @@ function fileRows(cur, base, strip) {
     const curPct = lines?.pct;
     if (curPct == null) continue;
     // json-summary keys are absolute; render repo-relative paths.
-    const path = strip && absPath.startsWith(strip) ? absPath.slice(strip.length) : absPath;
+    const path =
+      strip && absPath.startsWith(strip)
+        ? absPath.slice(strip.length)
+        : absPath;
     const basePct = base?.[absPath]?.lines?.pct;
     if (basePct == null) {
       rows.push({ path, curPct, basePct: null, delta: null });
@@ -59,17 +62,22 @@ function render(currentJson, baselineJson) {
   const base = baselineJson ? JSON.parse(baselineJson) : null;
   const curTotal = cur.total?.lines?.pct;
   if (curTotal == null) {
-    throw new Error("current summary has no total.lines.pct — was it a json-summary run?");
+    throw new Error(
+      "current summary has no total.lines.pct — was it a json-summary run?",
+    );
   }
   const baseTotal = base?.total?.lines?.pct;
   const lines = [];
   lines.push(`## Coverage (lines)`);
   lines.push("");
   if (baseTotal == null) {
-    lines.push(`No baseline on \`main\` yet — totals only: **${fmt(curTotal)}**`);
+    lines.push(
+      `No baseline on \`main\` yet — totals only: **${fmt(curTotal)}**`,
+    );
   } else {
     const d = curTotal - baseTotal;
-    const arrow = d === 0 ? "=" : `${d > 0 ? "+" : "−"}${Math.abs(d).toFixed(1)}`;
+    const arrow =
+      d === 0 ? "=" : `${d > 0 ? "+" : "−"}${Math.abs(d).toFixed(1)}`;
     lines.push(`**Total:** ${fmt(baseTotal)} → ${fmt(curTotal)} (${arrow})`);
   }
   const rows = base ? fileRows(cur, base, `${process.cwd()}/`) : [];
@@ -87,7 +95,9 @@ function render(currentJson, baselineJson) {
     }
   }
   lines.push("");
-  lines.push(`<sub>Report-only per #27 — no threshold, never fails CI. Baseline: last successful \`ci\` run on \`main\`.</sub>`);
+  lines.push(
+    `<sub>Report-only per #27 — no threshold, never fails CI. Baseline: last successful \`ci\` run on \`main\`.</sub>`,
+  );
   return lines.join("\n");
 }
 
@@ -102,20 +112,42 @@ async function upsertComment({ repo, pr, body }) {
         }),
     );
   const existing = JSON.parse(
-    await gh(["api", `repos/${repo}/issues/${pr}/comments`, "--paginate", "--jq", "."]),
+    await gh([
+      "api",
+      `repos/${repo}/issues/${pr}/comments`,
+      "--paginate",
+      "--jq",
+      ".",
+    ]),
   );
   const prior = existing.find((c) => c.body?.includes(MARKER));
   if (prior) {
-    await gh(["api", "--method", "PATCH", `repos/${repo}/issues/${pr}/comments/${prior.id}`, "-f", `body=${body}`]);
+    await gh([
+      "api",
+      "--method",
+      "PATCH",
+      `repos/${repo}/issues/${pr}/comments/${prior.id}`,
+      "-f",
+      `body=${body}`,
+    ]);
     return `updated comment ${prior.id}`;
   }
-  await gh(["api", "--method", "POST", `repos/${repo}/issues/${pr}/comments`, "-f", `body=${body}`]);
+  await gh([
+    "api",
+    "--method",
+    "POST",
+    `repos/${repo}/issues/${pr}/comments`,
+    "-f",
+    `body=${body}`,
+  ]);
   return `created new comment`;
 }
 
 const args = parseArgs(process.argv.slice(2));
 if (!args.current) {
-  console.error("usage: coverage-delta.mjs --current <path> [--baseline <path>] [--pr <n>] [--repo <o/n>]");
+  console.error(
+    "usage: coverage-delta.mjs --current <path> [--baseline <path>] [--pr <n>] [--repo <o/n>]",
+  );
   process.exit(2);
 }
 const baselineJson = args.baseline ? readFileSync(args.baseline, "utf8") : null;
