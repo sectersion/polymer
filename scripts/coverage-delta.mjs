@@ -127,7 +127,7 @@ async function upsertComment({ repo, pr, body }) {
             "--paginate",
             `repos/${repo}/issues/${pr}/comments`,
             "--jq",
-            `{id: .id, mine: (.body | contains(${JSON.stringify(MARKER)}))} | tostring`,
+            `.[] | {id: .id, mine: (.body | contains(${JSON.stringify(MARKER)}))} | tostring`,
           ],
           (err, out, stderr) =>
             err
