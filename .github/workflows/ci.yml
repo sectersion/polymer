@@ -33,6 +33,10 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # Coverage ratchet comment (issue #42) upserts a sticky issue
+    # comment; the run itself needs nothing else from the token.
+    permissions:
+      issues: write
     strategy:
       fail-fast: false
       matrix:
@@ -59,6 +63,28 @@ jobs:
       - run: pnpm --filter @polymer/${{ matrix.package }} test
       - run: pnpm --filter @polymer/server exec vitest run --coverage
         if: matrix.coverage == true
+      # Coverage ratchet (issue #42): main runs record the json-summary
+      # as an artifact; PR runs diff against it and upsert a sticky
+      # comment. Visibility only — no threshold, never fails (issue #27).
+      - uses: actions/upload-artifact@v5
+        if: matrix.coverage == true && github.event_name == 'push'
+        with:
+          name: coverage-summary-main
+          path: apps/server/coverage/coverage-summary.json
+      - name: coverage delta comment
+        if: matrix.coverage == true && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.number }}
+        run: |
+          gh run download "$(gh run list -w ci -b main -s success -L 1 --json databaseId --jq '.[0].databaseId')" \
+            -n coverage-summary-main -D /tmp/coverage-baseline \
+            || echo "no main baseline artifact yet — totals-only comment"
+          node scripts/coverage-delta.mjs \
+            --current apps/server/coverage/coverage-summary.json \
+            --baseline /tmp/coverage-baseline/coverage-summary.json \
+            --pr "$PR_NUMBER" || echo "coverage comment skipped (visibility only)"
 
   e2e:
     runs-on: ubuntu-latest
