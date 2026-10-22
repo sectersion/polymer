@@ -1,0 +1,4 @@
+# Every path routes to the maintainer: the author of a PR is never the
+# one merging (working agreement, issue #34), so review needs a default
+# owner beyond the author. Refine per-directory as owners appear.
+* @sectersion
