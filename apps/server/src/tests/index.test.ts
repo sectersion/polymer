@@ -8,7 +8,7 @@ import {
 
 describe("server skeleton", () => {
   it("exposes a version", () => {
-    expect(VERSION).toBe("0.0.0");
+    expect(VERSION).toBe("0.1.0");
   });
 
   it("builds a clean startup message with defaults", () => {
@@ -21,7 +21,7 @@ describe("server skeleton", () => {
 
   it("builds a startup message with explicit host/port", () => {
     expect(buildStartupMessage("127.0.0.1", 3000)).toBe(
-      "polymer server v0.0.0 starting on 127.0.0.1:3000",
+      "polymer server v0.1.0 starting on 127.0.0.1:3000",
     );
   });
 });

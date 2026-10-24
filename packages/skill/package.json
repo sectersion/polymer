@@ -1,6 +1,6 @@
 {
   "name": "@polymer/skill",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Polymer agent skill: enrollment installer, MCP config template, and the agent runtime contract.",
