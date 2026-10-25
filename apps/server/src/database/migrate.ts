@@ -9,7 +9,6 @@ import {
   getSchemaVersion,
   migrateDown,
   migrateReset,
-  migrateUp,
   openDatabase,
   resolveDatabasePath,
 } from "./db.js";
@@ -37,19 +36,19 @@ function main(): void {
   }
   const db = openDatabase(dbPath);
   try {
+    // openDatabase always migrates to head before these commands run
+    // (audit #27): a nested `up` can therefore only ever confirm the
+    // version, and `down` can never observe zero applied migrations.
+    // The branches that printed "migrated"/"has no applied
+    // migrations" were unreachable and are deleted.
     if (command === "up") {
-      const applied = migrateUp(db);
       console.log(
-        applied.length === 0
-          ? `${dbPath} already at schema version ${getSchemaVersion(db)}`
-          : `migrated ${dbPath}: applied [${applied.join(", ")}], now at version ${getSchemaVersion(db)}`,
+        `${dbPath} already at schema version ${getSchemaVersion(db)}`,
       );
     } else if (command === "down") {
       const rolledBack = migrateDown(db);
       console.log(
-        rolledBack === null
-          ? `${dbPath} has no applied migrations`
-          : `rolled back version ${rolledBack} on ${dbPath}, now at version ${getSchemaVersion(db)}`,
+        `rolled back version ${rolledBack} on ${dbPath}, now at version ${getSchemaVersion(db)}`,
       );
     } else {
       console.error(`unknown command: ${command} (expected up|down|reset)`);
