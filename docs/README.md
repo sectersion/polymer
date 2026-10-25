@@ -9,6 +9,8 @@
 - [Skill plan](SKILL_PLAN.md): what the agent skill package ships and
   the agent-side runtime contract.
 - [Human overview](HUMANS.md): what Polymer is, in plain language.
+- [Automation](AUTOMATION.md): what runs by itself on this repo today,
+  and what does not run yet (#96 M1 bookkeeping).
 - [Review skills](../skills/): checklists applied to every change.
 - [Agent skill](../packages/skill/SKILL.md): enrollment, lifecycle,
   telemetry, rotation — what a connected agent needs to know.
