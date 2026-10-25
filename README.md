@@ -1,55 +1,30 @@
 # Polymer
 
-[![CI](https://github.com/sectersion/polymer/actions/workflows/ci.yml/badge.svg)](https://github.com/sectersion/polymer/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](package.json)
+![Polymer demo](docs/demo.gif)
 
-Fleet coordination for coding agents. One server for task leases, handoffs, and cost attribution.
+## What is Polymer?
 
-**Stop DMing tasks between agents. Claim them, lease them, watch them land.**
+Polymer is a server that coordinates a fleet of coding agents. Agents claim tasks under a lease so two agents don't take the same work, hand tasks off to each other with `@mentions`, and record what each task cost. Everything is visible in one web UI.
 
-![One task, claimed, handed off, done — cost accounted](docs/demo.gif)
-
-## Quick start
+## Install
 
 ```sh
 pnpm install && pnpm build
 node packages/skill/setup.mjs --name you --dir ./my-fleet
 ```
 
-Tell your agent:
+To check the install, run `pnpm e2e:fleet`.
 
-> Enroll with `node packages/skill/install.mjs`, read `packages/skill/SKILL.md`, then loop: heartbeat, claim one task, do it, complete it, emit one OTLP batch. On `version_mismatch`, re-read and retry — never force.
+## Why should I care
 
-Verify the install:
-
-```sh
-pnpm e2e:fleet
-```
+If you run more than one coding agent, tasks get passed around in chat and it's hard to tell who has what or what it cost. Polymer gives each task one owner at a time and keeps a record of who did what.
 
 ## How it works
 
-Agents pull work instead of waiting for it: heartbeat for liveness, claim a task under a transactional lease, hand off in comments with `@mentions`, stream OTel spans that join back to the task. `done` is terminal. Money is integer micro-USD, never floats.
+Agents send a heartbeat to show they're alive, claim a task, and complete it. Handoffs are recorded as comments. Agents send OpenTelemetry traces that link back to the task. Costs are stored as integer micro-USD, so totals don't pick up floating-point rounding errors.
 
-```
-Agents (any MCP-capable runner) ── MCP + OTLP ──▶ Polymer Server ── REST ──▶ Web UI
-```
+## Advanced
 
-## Roadmap
-
-What's next, in priority order:
-
-- **Fleet runtime v2** — the closed loop: release → deploy → operate → observe, resident agents working the backlog AI-driving-AI ([#47](https://github.com/sectersion/polymer/issues/47), [#46](https://github.com/sectersion/polymer/issues/46), [#39](https://github.com/sectersion/polymer/issues/39))
-- **Deploy-automated releases** — every merge lands on the host, health-gated; the pipeline (health gate #80, pinned host key #81) is built — what's left is wiring the target machine ([#76](https://github.com/sectersion/polymer/issues/76))
-- **Ecosystem** — GitHub/Linear sync, webhooks, notification bots ([#54](https://github.com/sectersion/polymer/issues/54))
-
-## Docs
-
-- [Design doc](polymer_fleet_management_design_bringup.md) — normative spec, wins on conflict.
-- [Docs index](docs/README.md) — workflow, skill plan, human overview.
-- [Agent skill](packages/skill/SKILL.md) — lifecycle, telemetry, rotation.
-- [Contributing](CONTRIBUTING.md) — clone → verify → pick an issue → PR rules.
-
-## License
-
-[MIT](LICENSE)
+- [Design doc](polymer_fleet_management_design_bringup.md): the detailed spec.
+- [Agent skill](packages/skill/SKILL.md): lifecycle, telemetry, and key rotation.
+- [Contributing](CONTRIBUTING.md): how to clone, verify, pick an issue, and open a PR.
