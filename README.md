@@ -1,5 +1,5 @@
 # Polymer
-
+[![CodeFactor](https://www.codefactor.io/repository/github/sectersion/polymer/badge)](https://www.codefactor.io/repository/github/sectersion/polymer)
 ![Polymer demo](docs/demo.gif)
 
 ## What is Polymer?
