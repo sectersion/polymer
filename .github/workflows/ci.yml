@@ -72,7 +72,7 @@ jobs:
       # Coverage ratchet (issue #42): main runs record the json-summary
       # as an artifact; PR runs diff against it and upsert a sticky
       # comment. Visibility only — no threshold, never fails (issue #27).
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: matrix.coverage == true && github.event_name == 'push'
         with:
           name: coverage-summary-main
