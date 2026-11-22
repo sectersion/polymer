@@ -97,3 +97,17 @@ starting work, and apply all of them to the diff before signoff:
 - Gate a step on a command's exit code only under `set -o pipefail` — a piped
   `tail`/`grep` otherwise swallows failures (lesson from audit #29).
 - Prefer editing existing files over creating new ones. Keep changes minimal.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (`sectersion/polymer`), managed via `gh`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`); `ready-for-agent` never triggers Cezar — only `needs-agent` does. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `GLOSSARY.md` + `docs/adr/`, created lazily. See `docs/agents/domain.md`.
