@@ -88,6 +88,59 @@ liveness) → `claim_task` → work → `post_comment` → status to
   into the child's environment, launch. Never share your own session
   token with a child.
 
+### Claude Code hooks (heartbeat without tool calls)
+
+In Claude Code, hooks can drive the heartbeat so the session stays
+visible even when the model never calls `send_heartbeat`.
+`polymer-heartbeat-hook` sends one `send_heartbeat` with the
+credential from `.polymrc` in `$CLAUDE_PROJECT_DIR` (or `--dir`); it
+never reads the hook's stdin payload, so identity cannot come from
+it. It sends at most one heartbeat per 30s per directory (timestamp
+in `.polymrc.heartbeat`), always exits 0 within 5s, and prints
+nothing to stdout. It only heartbeats: it never claims or completes
+a task. `hooks/hooks.json` is the plugin form; without the plugin,
+add this to `.claude/settings.json` in the enrolled directory:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "polymer-heartbeat-hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "polymer-heartbeat-hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "polymer-heartbeat-hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
 ## Telemetry
 
 Point your OTLP exporter at the base URL (SDKs append `/v1/traces`):

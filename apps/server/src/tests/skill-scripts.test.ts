@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +17,7 @@ const SKILL_DIR = resolve(HERE, "../../../../packages/skill");
 const INSTALLER = join(SKILL_DIR, "install.mjs");
 const STATUS = join(SKILL_DIR, "status.mjs");
 const REFRESH = join(SKILL_DIR, "refresh.mjs");
+const HEARTBEAT_HOOK = join(SKILL_DIR, "heartbeat-hook.mjs");
 
 function runScript(
   script: string,
@@ -248,6 +250,73 @@ describe("agent roster/info and skill scripts (loose-end B)", () => {
       expect(empty.status).toBe(1);
       expect(empty.stderr).toContain("no server/session");
     } finally {
+      await app.close();
+    }
+  }, 60000);
+
+  it("heartbeat hook moves last_seen from the credential alone, then stays silent inside the rate-limit window", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-hook-"),
+    });
+    // Stub that only counts requests: proves whether the hook sent any.
+    let stubHits = 0;
+    const stub = createServer((_req, res) => {
+      stubHits += 1;
+      res.statusCode = 404;
+      res.end();
+    });
+    await new Promise<void>((r) => stub.listen(0, "127.0.0.1", r));
+    const stubAddr = stub.address() as import("node:net").AddressInfo;
+    const stubUrl = `http://127.0.0.1:${stubAddr.port}`;
+    try {
+      const dir = mkdtempSync(join(tmpdir(), "polymer-hook-"));
+      const rc = await enroll(app, dir, "hook-agent");
+      const lastSeen = () =>
+        (
+          app
+            .db!.prepare("SELECT last_seen FROM agents WHERE agent_id = ?")
+            .get(rc["agent_id"]) as { last_seen: string }
+        ).last_seen;
+      app
+        .db!.prepare("UPDATE agents SET last_seen = ? WHERE agent_id = ?")
+        .run("2000-01-01T00:00:00.000Z", rc["agent_id"]);
+
+      const first = await runScript(HEARTBEAT_HOOK, dir);
+      expect(first.status).toBe(0);
+      expect(first.stdout).toBe("");
+      const moved = lastSeen();
+      expect(moved).not.toBe("2000-01-01T00:00:00.000Z");
+      expect(Date.parse(moved)).toBeGreaterThan(Date.now() - 60000);
+
+      // Inside the window: no request at all, even to another server.
+      const second = await runScript(HEARTBEAT_HOOK, dir, {
+        POLYMER_SERVER: stubUrl,
+      });
+      expect(second.status).toBe(0);
+      expect(second.stdout).toBe("");
+      expect(stubHits).toBe(0);
+      expect(lastSeen()).toBe(moved);
+
+      // Window cleared: the stub does see a request, and a server that
+      // rejects it still never fails the hook or leaks the token.
+      rmSync(join(dir, ".polymrc.heartbeat"));
+      const third = await runScript(HEARTBEAT_HOOK, dir, {
+        POLYMER_SERVER: stubUrl,
+      });
+      expect(third.status).toBe(0);
+      expect(third.stdout).toBe("");
+      expect(stubHits).toBeGreaterThan(0);
+      expect(third.stderr).not.toContain(rc["session_token"] as string);
+
+      // Not enrolled: still exit 0, silently on stdout.
+      const empty = await runScript(
+        HEARTBEAT_HOOK,
+        mkdtempSync(join(tmpdir(), "polymer-hook-")),
+      );
+      expect(empty.status).toBe(0);
+      expect(empty.stdout).toBe("");
+    } finally {
+      await new Promise((r) => stub.close(r));
       await app.close();
     }
   }, 60000);
