@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { shortcutModifier } from "./shortcut-label";
 
 const NAV = [
   { href: "/", label: "Fleet" },
@@ -24,6 +25,11 @@ const FOCUS_RING =
 export function ConsoleNav(): React.JSX.Element {
   const pathname = usePathname();
   const router = useRouter();
+  const [modifier, setModifier] = useState("Ctrl");
+
+  useEffect(() => {
+    setModifier(shortcutModifier(navigator.userAgent));
+  }, []);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
@@ -51,7 +57,7 @@ export function ConsoleNav(): React.JSX.Element {
             key={item.href}
             href={item.href}
             aria-current={active ? "page" : undefined}
-            title={`${item.label} (Γîÿ${index + 1})`}
+            title={`${item.label} (${modifier}+${index + 1})`}
             className={`text-(--color-fg-muted) hover:text-(--color-accent) ${FOCUS_RING} ${active ? "font-semibold text-(--color-fg)" : ""}`}
           >
             {item.label}
