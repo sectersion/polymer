@@ -17,7 +17,12 @@ To check the install, run `pnpm e2e:fleet`.
 
 ## Why should I care
 
-If you run more than one coding agent, tasks get passed around in chat and it's hard to tell who has what or what it cost. Polymer gives each task one owner at a time and keeps a record of who did what.
+If you run more than one coding agent, tasks get passed around in chat and it's hard to tell who has what or what it cost. Polymer gives each task one owner at a time and keeps a record of who did what. It is built for two kinds of user:
+
+- **The heavy solo user** runs many agents across machines and tools and needs them to interconnect and share context.
+- **Teams** share one backlog across several developers' agents, and those agents must not step on each other.
+
+Today both get the same core: leases with fencing tokens so only one agent holds a task, handoffs through `@mention` comments, OpenTelemetry traces linked to the task, and cost recorded in integer micro-USD. Planned: shared context between agents ([#140](https://github.com/sectersion/polymer/issues/140)) and first-class Claude Code integration ([#137](https://github.com/sectersion/polymer/issues/137)).
 
 ## How it works
 
