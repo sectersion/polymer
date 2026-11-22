@@ -65,9 +65,15 @@ describe("polymer-setup one-command bootstrap", () => {
       "--port",
       String(port),
     ]);
-    expect(run.status).toBe(0);
-    expect(JSON.parse(run.stdout)["ok"]).toBe(true);
-    expect(readFileSync(join(dir, ".polymrc"), "utf8")).toContain("server");
+    try {
+      expect(run.status).toBe(0);
+      expect(JSON.parse(run.stdout)["ok"]).toBe(true);
+      expect(readFileSync(join(dir, ".polymrc"), "utf8")).toContain("server");
+    } finally {
+      // The daemon setup started must not outlive the test: on win32 a
+      // leaked daemon holds the runner's inherited stdout open (#136).
+      await runSetup(["--stop", "--dir", dir]);
+    }
   }, 90000);
 
   it("boots a daemon, enrolls, verifies; reruns reuse; stop kills", async () => {

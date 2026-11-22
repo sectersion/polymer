@@ -1,3 +1,6 @@
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
 export const VERSION = "0.1.0";
 
 export const DEFAULT_PORT = 8080;
@@ -106,11 +109,26 @@ function main(): void {
     });
 }
 
-const invokedDirectly =
-  process.argv[1] !== undefined &&
-  (process.argv[1].endsWith("dist/index.js") ||
-    process.argv[1].endsWith("src/index.ts"));
+/**
+ * True when `argv1` (the script node was asked to run) is this module.
+ * Compared as file URLs of the real path, so it holds for any path
+ * separator (win32 backslashes, issue #136) and for symlinked entries
+ * such as pnpm bin links; Node's ESM loader already reports the
+ * realpath in `import.meta.url`.
+ */
+export function isEntryPoint(
+  argv1: string | undefined,
+  moduleUrl: string,
+): boolean {
+  if (argv1 === undefined) return false;
+  try {
+    return pathToFileURL(realpathSync(argv1)).href === moduleUrl;
+  } catch {
+    // argv[1] is not a file on disk (e.g. an arg after `node -e`).
+    return false;
+  }
+}
 
-if (invokedDirectly) {
+if (isEntryPoint(process.argv[1], import.meta.url)) {
   main();
 }
