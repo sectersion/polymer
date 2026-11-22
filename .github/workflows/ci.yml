@@ -105,6 +105,50 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm e2e:fleet
 
+  # Windows entry smoke (issue #136): the built server must actually
+  # start on win32, where argv[1] uses backslashes. Every other job is
+  # Linux-only, which is how a no-op entry guard shipped green.
+  windows-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    name: smoke (server, windows)
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @polymer/server build
+      - name: --help prints usage
+        run: |
+          set -o pipefail
+          node apps/server/dist/index.js --help | tee help.txt
+          grep -q "Usage: polymer-server" help.txt
+      - name: server starts and answers GET /health
+        env:
+          POLYMER_DATABASE_PATH: ${{ runner.temp }}/polymer-smoke.db
+        run: |
+          set -o pipefail
+          node apps/server/dist/index.js --port 18080 > server.log 2>&1 &
+          pid=$!
+          ok=0
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/health | grep -q '"ok":true'; then
+              ok=1
+              break
+            fi
+            sleep 1
+          done
+          kill "$pid" || true
+          # Log holds the one-time master credential line; print only
+          # the non-secret startup lines.
+          grep -E "starting on|ready on|failed to start" server.log || true
+          test "$ok" = 1
+
   # Browser smoke for the admin console (issue #43): its own job, not
   # the tests matrix, so the slow Playwright browser download never
   # gates unit-test feedback. No artifacts uploaded on purpose: a
