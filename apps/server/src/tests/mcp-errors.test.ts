@@ -334,7 +334,7 @@ describe("MCP tool error branches over the real transport (audit #27)", () => {
     }
   });
 
-  it("a disabled agent's heartbeat is rejected as unauthorized", async () => {
+  it("a disabled agent can no longer authenticate", async () => {
     const app = await listen("127.0.0.1", 0, {
       databasePath: tempDbPath("polymer-mcperr-"),
     });
@@ -359,13 +359,10 @@ describe("MCP tool error branches over the real transport (audit #27)", () => {
         headers: { cookie: admin.cookie, "x-csrf-token": admin.csrf },
         body: "{}",
       });
-      await withAuthedClients(app, [agent.token], async ([client]) => {
-        expect(
-          await errorText(
-            client.callTool({ name: "send_heartbeat", arguments: {} }),
-          ),
-        ).toContain("unauthorized");
-      });
+      // Disable revokes credentials: the agent cannot authenticate.
+      await expect(
+        withAuthedClients(app, [agent.token], async () => undefined),
+      ).rejects.toThrow();
     } finally {
       await app.close();
     }

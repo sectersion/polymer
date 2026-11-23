@@ -25,6 +25,10 @@ interface DisableResult {
  * the freeze check and escapes this call (retry re-snapshots and
  * catches it).
  *
+ * Disabling also revokes the batch's credentials (same transaction),
+ * so a disabled agent cannot authenticate, read, refresh, or post OTLP.
+ * A spawn that raced the cascade still hits `parent_disabled`.
+ *
  * Disabling releases task leases: every task the batch coordinates
  * keeps its coordinator (history) but gets `lease_expires_at: null`
  * with an incremented generation — immediately claimable.
@@ -70,12 +74,17 @@ export function disableAgentSubtree(
         )
         .all(...batch) as Array<{ agent_id: string }>;
       const disabled = { changes: flipped.length };
-      // NOTE: credentials are deliberately NOT revoked here. The
-      // spec requires spawns under a disabled parent to fail with
-      // parent_disabled from inside the insert transaction — which is
-      // only reachable while the disabled agent still authenticates.
-      // (Live admin sockets are unaffected by agent disable for the
-      // same reason: no admin session is tied to an agent.)
+      // "Disabled means unauthenticated": revoke every active
+      // credential of the whole batch (not just the flipped rows, so
+      // a retry also sweeps credentials minted after a prior pass) in
+      // the same transaction as the flip. Every entry point (MCP,
+      // OTLP, refresh) re-verifies the credential per request, so
+      // live sessions die at their next call. Re-enable never
+      // resurrects them; the agent re-registers.
+      db.prepare(
+        `UPDATE credentials SET status = 'revoked'
+          WHERE agent_id IN (${placeholders}) AND status = 'active'`,
+      ).run(...batch);
       // Lease release for the batch: coordinator kept for history,
       // lease nulled, generation bumped — claimable immediately.
       db.prepare(
@@ -122,6 +131,7 @@ interface ReenableResult {
  * Only `disabled` rows flip: members re-disabled concurrently keep
  * their status via the `status = 'disabled'` guard. Task leases are
  * untouched — a re-enabled agent claims like any other agent.
+ * Credentials revoked by disable stay revoked: re-registration.
  */
 export function reenableAgentSubtree(
   db: PolymerDatabase,

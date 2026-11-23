@@ -1435,16 +1435,12 @@ describe("administrator authentication (component 19)", () => {
         body: {},
       });
 
-      // Spawns under a disabled parent fail in the same transaction
-      // as the insert — parent_disabled, never a 500.
-      await withAuthedClients(app, [parent.token], async ([client]) => {
-        const spawned = (await client.callTool({
-          name: "register_subagent",
-          arguments: { name: "escapee", role: "coder" },
-        })) as unknown as { isError?: boolean };
-        expect(spawned.isError).toBe(true);
-        expect(JSON.stringify(spawned)).toContain("parent_disabled");
-      });
+      // Disable revokes credentials: the parent cannot even connect,
+      // so no spawn can happen (the in-transaction parent_disabled
+      // freeze is covered in disable-revokes.test.ts).
+      await expect(
+        withAuthedClients(app, [parent.token], async () => undefined),
+      ).rejects.toThrow();
       const escapee = app
         .db!.prepare("SELECT agent_id FROM agents WHERE name = 'escapee'")
         .get() as { agent_id: string } | undefined;
