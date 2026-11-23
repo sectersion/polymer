@@ -58,13 +58,12 @@ Highest precedence first:
 `.gitignore`. Never paste its contents into comments, logs, or
 prompts. The MCP client config is host-native and carries no
 secrets: `opencode.json` (`mcp.servers.polymer`, a `local` stdio
-entry running `polymer-proxy`) for OpenCode, `.mcp.json` (type
-`http`) for Claude Code. The Bearer credential travels out of band:
-the OpenCode bridge reads it from `.polymrc` directly (OpenCode's
-shared service does not inherit the agent shell's environment, so
-env-substituted headers arrive empty), while Claude Code resolves
-`${POLYMER_SESSION_TOKEN}` in headers from the environment — set it
-from `.polymrc` before launch, per the order above. The installer
+entry running `polymer-proxy`) for OpenCode, `.mcp.json`
+(`mcpServers.polymer`, a `stdio` entry running `polymer-proxy`) for
+Claude Code. The proxy reads the Bearer from `.polymrc` directly, so
+no secret is needed in the shell environment (OpenCode's shared
+service would not inherit it anyway). Rerunning the installer
+upgrades a legacy http `.mcp.json` entry to this shape. The installer
 also leaves a marker-delimited Polymer section in `AGENTS.md` so an
 agent launched with no prompt discovers the managed connection and
 uses the preconfigured `polymer` tools instead of hand-rolling

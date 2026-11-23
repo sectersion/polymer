@@ -206,18 +206,43 @@ describe("skill installer (component 30)", () => {
       const mcp = JSON.parse(
         readFileSync(join(dir, ".mcp.json"), "utf8"),
       ) as Record<string, unknown>;
-      expect(
-        (mcp["mcpServers"] as Record<string, Record<string, unknown>>)[
-          "polymer"
-        ]?.["type"],
-      ).toBe("http");
-      expect(
+      const entry = (
+        mcp["mcpServers"] as Record<
+          string,
+          { type: string; command: string; args: string[] }
+        >
+      )["polymer"]!;
+      expect(entry.type).toBe("stdio");
+      expect(entry.args).toEqual([PROXY, "--dir", dir]);
+      // No secret and no env-var indirection anywhere in the config.
+      const raw = readFileSync(join(dir, ".mcp.json"), "utf8");
+      expect(raw).not.toContain("POLYMER_SESSION_TOKEN");
+      expect(raw).not.toContain(
         (
-          (mcp["mcpServers"] as Record<string, Record<string, unknown>>)[
-            "polymer"
-          ]["headers"] as Record<string, string>
-        )["Authorization"],
-      ).toBe("Bearer ${POLYMER_SESSION_TOKEN}");
+          JSON.parse(readFileSync(join(dir, ".polymrc"), "utf8")) as {
+            session_token: string;
+          }
+        ).session_token,
+      );
+
+      // The written entry itself reaches the server with no env secret.
+      const client = new Client({ name: "claude-entry", version: "0.0.0" });
+      await client.connect(
+        new StdioClientTransport({
+          command: entry.command,
+          args: entry.args,
+          env: { PATH: process.env["PATH"] ?? "" },
+        }),
+      );
+      try {
+        const ping = (await client.callTool({
+          name: "ping",
+          arguments: {},
+        })) as { structuredContent: Record<string, unknown> };
+        expect(ping.structuredContent["ok"]).toBe(true);
+      } finally {
+        await client.close();
+      }
 
       const bogus = await install(app, tempRepo(), [
         "--name",
@@ -372,6 +397,26 @@ describe("skill installer (component 30)", () => {
       expect(c.res.status).toBe(1);
       expect(c.res.stderr).toContain('different "polymer"');
       expect(readFileSync(c.path, "utf8")).toBe(conflict);
+
+      // The pre-#171 http entry is upgraded to stdio in place.
+      const legacyDir = tempRepo();
+      const l = await run(
+        legacyDir,
+        JSON.stringify({
+          mcpServers: {
+            polymer: {
+              type: "http",
+              url: `${app.url}/mcp`,
+              headers: { Authorization: "Bearer ${POLYMER_SESSION_TOKEN}" },
+            },
+          },
+        }),
+      );
+      expect(l.res.status).toBe(0);
+      const upgraded = JSON.parse(readFileSync(l.path, "utf8")) as {
+        mcpServers: { polymer: { type: string } };
+      };
+      expect(upgraded.mcpServers.polymer.type).toBe("stdio");
 
       // Malformed JSON is refused and the file is untouched.
       const m = await run(tempRepo(), "{ not json");

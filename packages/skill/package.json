@@ -18,8 +18,7 @@
     "setup.mjs",
     "config.mjs",
     "proxy.mjs",
-    "SKILL.md",
-    "mcp.json.template"
+    "SKILL.md"
   ],
   "scripts": {
     "build": "echo \"@polymer/skill: static files, nothing to build\"",

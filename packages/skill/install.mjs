@@ -12,9 +12,9 @@
  * - Host-native MCP client config, no secrets, safe to track:
  *   `opencode.json` for --client opencode (merged into an existing
  *   config, `mcp.servers.polymer` entry); `.mcp.json` for --client
- *   claude (from mcp.json.template). The Bearer travels via
- *   `{env:POLYMER_SESSION_TOKEN}` / `${POLYMER_SESSION_TOKEN}` header
- *   substitution, never a literal secret.
+ *   claude (`mcpServers.polymer`, merged). Both run `polymer-proxy`
+ *   over stdio, which reads the Bearer from `.polymrc`: no secret in
+ *   the shell environment, argv, or config.
  * - `.gitignore`: gains a `.polymrc` line (exact-line match, so
  *   reruns never duplicate it).
  * - `AGENTS.md`: a marker-delimited Polymer section telling the agent
@@ -46,7 +46,7 @@ function usage() {
     "only when no working credentials exist yet for --server/--name.",
     "--client picks the config format: opencode writes/merges",
     'opencode.json (mcp.servers, type "remote"); claude writes',
-    '.mcp.json (mcpServers, type "http").',
+    '.mcp.json (mcpServers, type "stdio").',
   ].join("\n");
 }
 
@@ -136,13 +136,15 @@ async function enroll(server, mcpPath, { initTokenId, initToken, name, role }) {
   return content;
 }
 
-function writeMcpJson(dir, server) {
-  const template = readFileSync(join(HERE, "mcp.json.template"), "utf8");
-  const desired = JSON.parse(
-    template
-      .replaceAll("${POLYMER_SERVER}", server)
-      .replaceAll("${MCP_TYPE}", "http"),
-  ).mcpServers.polymer;
+function writeMcpJson(dir, server, mcpPath) {
+  const desired = stdioEntry(dir);
+  // The pre-#171 installer wrote an http entry reading the Bearer from
+  // the shell environment; recognize exactly that shape and upgrade it.
+  const legacy = {
+    type: "http",
+    url: `${server}${mcpPath}`,
+    headers: { Authorization: "Bearer ${POLYMER_SESSION_TOKEN}" },
+  };
   const path = join(dir, ".mcp.json");
   const config = readJsonObject(path);
   const servers = (config.mcpServers ??= {});
@@ -153,7 +155,7 @@ function writeMcpJson(dir, server) {
   ) {
     throw new Error(`${path}: "mcpServers" is not an object`);
   }
-  setPolymerEntry(servers, desired, path);
+  setPolymerEntry(servers, desired, path, legacy);
   writeFileSync(
     path,
     `${JSON.stringify(config, null, 2)}
@@ -182,11 +184,13 @@ function readJsonObject(path) {
 }
 
 /** Set `servers.polymer`; a different existing entry is an error, never a clobber. */
-function setPolymerEntry(servers, desired, path) {
+function setPolymerEntry(servers, desired, path, legacy) {
   const existing = servers.polymer;
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   if (
     existing !== undefined &&
-    JSON.stringify(existing) !== JSON.stringify(desired)
+    !same(existing, desired) &&
+    !(legacy && same(existing, legacy))
   ) {
     throw new Error(
       `${path} already defines a different "polymer" MCP server entry; ` +
@@ -220,6 +224,15 @@ function opencodeEntry(dir) {
   return {
     type: "local",
     command: [process.execPath, join(HERE, "proxy.mjs"), "--dir", dir],
+  };
+}
+
+/** Claude Code launches the same bridge over stdio (no secret in env/argv/config). */
+function stdioEntry(dir) {
+  return {
+    type: "stdio",
+    command: process.execPath,
+    args: [join(HERE, "proxy.mjs"), "--dir", dir],
   };
 }
 
@@ -264,9 +277,9 @@ function writeOpencodeConfig(dir) {
   return path;
 }
 
-function writeClientConfig(dir, server, client) {
+function writeClientConfig(dir, server, client, mcpPath) {
   return client === "claude"
-    ? writeMcpJson(dir, server)
+    ? writeMcpJson(dir, server, mcpPath)
     : writeOpencodeConfig(dir);
 }
 
@@ -280,8 +293,9 @@ function agentsMdBlock(server) {
     "- Use the polymer MCP tools for fleet coordination (ping, get_tasks,",
     "  claim_task, send_heartbeat, post_comment). Do not hand-roll HTTP",
     "  clients against the server.",
-    "- Calls authenticate from `.polymrc` automatically (OpenCode runs a",
-    "  stdio bridge, `polymer-proxy`; no secrets in config, env, or argv).",
+    "- Calls authenticate from `.polymrc` automatically (a stdio bridge,",
+    "  `polymer-proxy`, attaches the credential; no secrets in config,",
+    "  env, or argv).",
     "  Never paste, log, or commit its contents.",
     "- Read-only connectivity check: `polymer-status`.",
     "<!-- polymer:end -->",
@@ -361,7 +375,7 @@ async function main() {
   ) {
     let configPath;
     try {
-      configPath = writeClientConfig(dir, server, client);
+      configPath = writeClientConfig(dir, server, client, mcpPath);
       ensureAgentsMd(dir, server);
     } catch (err) {
       fail(1, err.message);
@@ -414,7 +428,7 @@ async function main() {
   chmodSync(rcPath, 0o600);
   let configPath;
   try {
-    configPath = writeClientConfig(dir, server, client);
+    configPath = writeClientConfig(dir, server, client, mcpPath);
     ensureAgentsMd(dir, server);
   } catch (err) {
     fail(1, err.message);
