@@ -18,7 +18,9 @@ Setup boots the server next to `--dir` (`polymer.db`, pidfile,
 log), captures the first-run master, mints an OTP, enrolls, and
 verifies — then prints the server URL and agent id. Reruns reuse a
 healthy daemon and existing credentials. `polymer-setup --status`
-checks the daemon; `polymer-setup --stop` ends it.
+checks the daemon; `polymer-setup --stop` ends it. Add
+`--client claude` for Claude Code (writes `.mcp.json`); the default
+is `opencode` (writes `opencode.json`).
 
 Manual enrollment (against an already-running server):
 

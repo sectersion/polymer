@@ -13,6 +13,8 @@ pnpm install && pnpm build
 node packages/skill/setup.mjs --name you --dir ./my-fleet
 ```
 
+Add `--client claude` for Claude Code (writes `.mcp.json`; default is opencode).
+
 To check the install, run `pnpm e2e:fleet`.
 
 ## Why should I care
