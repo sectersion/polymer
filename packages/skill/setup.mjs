@@ -8,6 +8,7 @@
  *
  * Usage:
  *   polymer-setup --name AGENT [--dir DIR] [--db PATH] [--port PORT]
+ *                 [--client opencode|claude]
  *   polymer-setup --stop [--dir DIR]
  *   polymer-setup --status [--dir DIR]
  *
@@ -39,11 +40,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 function usage() {
   return [
     "usage: polymer-setup --name AGENT [--dir DIR] [--db PATH] [--port PORT]",
+    "                      [--client opencode|claude]",
     "       polymer-setup --stop [--dir DIR]",
     "       polymer-setup --status [--dir DIR]",
     "",
     "Boot a local Polymer server (daemonized) and enroll an agent.",
     "Re-runs reuse a healthy daemon and existing credentials.",
+    "--client is forwarded to polymer-install (default opencode; claude",
+    "writes .mcp.json).",
   ].join("\n");
 }
 
@@ -221,6 +225,13 @@ async function main() {
   }
   const name = argOf(argv, "--name");
   if (!name) fail(2, `missing --name\n${usage()}`);
+  const client = argOf(argv, "--client") ?? "opencode";
+  if (client !== "opencode" && client !== "claude") {
+    fail(
+      2,
+      `--client must be opencode or claude, got ${JSON.stringify(client)}`,
+    );
+  }
   const dbPath = resolve(argOf(argv, "--db") ?? join(dir, "polymer.db"));
   const installer = join(HERE, "install.mjs");
 
@@ -304,7 +315,16 @@ async function main() {
     if (mint.status !== 200) fail(1, "OTP mint failed on fresh server");
     otp = await mint.json();
   }
-  const installArgs = ["--server", url, "--dir", dir, "--name", name];
+  const installArgs = [
+    "--server",
+    url,
+    "--dir",
+    dir,
+    "--name",
+    name,
+    "--client",
+    client,
+  ];
   if (otp !== null) {
     installArgs.push(
       "--init-token-id",

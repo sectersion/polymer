@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,6 +50,45 @@ async function freePort(): Promise<number> {
 }
 
 describe("polymer-setup one-command bootstrap", () => {
+  it("forwards --client claude to install so .mcp.json is written (#172)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "polymer-setup-"));
+    const port = await freePort();
+    const db = tempDbPath("polymer-setup-client-");
+    const run = await runSetup([
+      "--name",
+      "setup-claude-agent",
+      "--dir",
+      dir,
+      "--db",
+      db,
+      "--port",
+      String(port),
+      "--client",
+      "claude",
+    ]);
+    try {
+      expect(run.status).toBe(0);
+      expect(existsSync(join(dir, ".mcp.json"))).toBe(true);
+      expect(existsSync(join(dir, "opencode.json"))).toBe(false);
+    } finally {
+      await runSetup(["--stop", "--dir", dir]);
+    }
+  }, 90000);
+
+  it("rejects an invalid --client before booting a daemon (#172)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "polymer-setup-"));
+    const run = await runSetup([
+      "--name",
+      "x",
+      "--dir",
+      dir,
+      "--client",
+      "vim",
+    ]);
+    expect(run.status).toBe(2);
+    expect(existsSync(join(dir, ".polymer-server.pid"))).toBe(false);
+  });
+
   it("creates a --dir that does not exist instead of crashing (audit #28)", async () => {
     const base = mkdtempSync(join(tmpdir(), "polymer-setup-"));
     const dir = join(base, "nested", "fresh-agent");
