@@ -19,6 +19,7 @@
     "setup.mjs",
     "config.mjs",
     "proxy.mjs",
+    "hook.mjs",
     "SKILL.md"
   ],
   "scripts": {

@@ -1,5 +1,12 @@
-import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { exec, spawn } from "node:child_process";
+import { createServer } from "node:net";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -137,5 +144,119 @@ describe("claude hooks drive heartbeat (#139)", () => {
     // No credentials at all: also quiet.
     const none = mkdtempSync(join(tmpdir(), "polymer-hooks-none-"));
     expect((await run("hook.mjs", ["--dir", none, "end"])).status).toBe(0);
+  }, 120000);
+
+  it("discloses hooks, quotes paths safely, refuses unsafe paths and bad settings, and survives a silent server", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-hooks-"),
+    });
+    try {
+      const base = mkdtempSync(join(tmpdir(), "polymer-hooks-"));
+      const args = (dir: string, name: string) => {
+        const { credential, secret } = mintCredential(app.db!, {
+          type: "init",
+        });
+        return [
+          "--server",
+          app.url,
+          "--dir",
+          dir,
+          "--name",
+          name,
+          "--init-token-id",
+          credential.credential_id,
+          "--init-token",
+          secret,
+          "--client",
+          "claude",
+        ];
+      };
+
+      // Path with a space: disclosed, and the written command really runs.
+      const spaced = join(base, "with space");
+      const ok = await run("install.mjs", args(spaced, "space-agent"));
+      expect(ok.status).toBe(0);
+      const settingsPath = join(spaced, ".claude", "settings.local.json");
+      expect(JSON.parse(ok.stdout)["hooks"]).toBe(settingsPath);
+      expect(ok.stderr).toContain(settingsPath);
+      expect(ok.stderr).toContain("trust prompt");
+      expect(readFileSync(join(spaced, ".gitignore"), "utf8")).toContain(
+        ".polymer-hook-stamp",
+      );
+      const command = (
+        JSON.parse(readFileSync(settingsPath, "utf8")) as {
+          hooks: { SessionStart: { hooks: { command: string }[] }[] };
+        }
+      ).hooks.SessionStart[0]!.hooks[0]!.command;
+      const agentId = (
+        JSON.parse(readFileSync(join(spaced, ".polymrc"), "utf8")) as {
+          agent_id: string;
+        }
+      ).agent_id;
+      const lastSeen = () =>
+        (
+          app
+            .db!.prepare("SELECT last_seen FROM agents WHERE agent_id = ?")
+            .get(agentId) as { last_seen: string }
+        ).last_seen;
+      const before = lastSeen();
+      await sleep(20);
+      await new Promise<void>((res, rej) =>
+        exec(command, { timeout: 30000 }, (err) => (err ? rej(err) : res())),
+      );
+      expect(lastSeen() > before).toBe(true);
+
+      // Shell metacharacter in --dir: refused before anything is written.
+      const evil = join(base, "a$(x)b");
+      const refused = await run("install.mjs", args(evil, "evil-agent"));
+      expect(refused.status).toBe(2);
+      expect(refused.stderr).toContain("contains one of");
+      expect(existsSync(evil)).toBe(false);
+
+      // Malformed / wrong-type settings: refused and left untouched.
+      for (const [label, text] of [
+        ["malformed", "{not json"],
+        ["array", "[]"],
+        ["hooks-array", '{"hooks": []}'],
+        ["event-object", '{"hooks": {"SessionStart": {}}}'],
+      ] as const) {
+        const dir = join(base, label);
+        mkdirSync(join(dir, ".claude"), { recursive: true });
+        const p = join(dir, ".claude", "settings.local.json");
+        writeFileSync(p, text);
+        const bad = await run("install.mjs", args(dir, `bad-${label}`));
+        expect(bad.status, label).not.toBe(0);
+        expect(readFileSync(p, "utf8"), label).toBe(text);
+      }
+    } finally {
+      await app.close();
+    }
+
+    // Server accepts the connection but never answers: exit 0 within budget.
+    const sockets: import("node:net").Socket[] = [];
+    const silent = createServer((s) => {
+      s.on("error", () => {});
+      sockets.push(s);
+    });
+    await new Promise<void>((r) => silent.listen(0, "127.0.0.1", r));
+    try {
+      const port = (silent.address() as { port: number }).port;
+      const hung = mkdtempSync(join(tmpdir(), "polymer-hooks-hung-"));
+      writeFileSync(
+        join(hung, ".polymrc"),
+        JSON.stringify({
+          server: `http://127.0.0.1:${port}`,
+          session_token: "x",
+        }),
+      );
+      const t0 = Date.now();
+      const out = await run("hook.mjs", ["--dir", hung, "session"]);
+      expect(out.status).toBe(0);
+      expect(out.stdout).toBe("");
+      expect(Date.now() - t0).toBeLessThan(8000);
+    } finally {
+      sockets.forEach((s) => s.destroy());
+      silent.close();
+    }
   }, 120000);
 });

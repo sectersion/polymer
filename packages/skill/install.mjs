@@ -315,7 +315,27 @@ function writeClaudeHooks(dir) {
   }
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
+  console.error(
+    `polymer-install: registered executable Claude Code hooks in ${path}; ` +
+      "Claude Code will ask you to accept them (trust prompt) on next start",
+  );
 }
+
+// Hook commands are shell strings: refuse paths the double-quoting above
+// cannot make safe on both POSIX and cmd.exe, before anything is written.
+function assertShellSafe(dir) {
+  for (const p of [dir, process.execPath, join(HERE, "hook.mjs")]) {
+    if (/["`$%\r\n]/.test(p)) {
+      throw new Error(
+        `path ${JSON.stringify(p)} contains one of " \` $ % or a newline; ` +
+          "use a path without them for --client claude hooks",
+      );
+    }
+  }
+}
+
+const hooksPath = (dir, client) =>
+  client === "claude" ? join(dir, ".claude", "settings.local.json") : null;
 
 function writeClientConfig(dir, server, client, mcpPath) {
   if (client !== "claude") return writeOpencodeConfig(dir);
@@ -384,10 +404,13 @@ function ensureInstructions(dir, server, client) {
 function ensureGitignore(dir) {
   const path = join(dir, ".gitignore");
   const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
-  const lines = existing.split("\n");
-  if (lines.some((line) => line.trim() === ".polymrc")) return false;
+  const lines = existing.split("\n").map((line) => line.trim());
+  const missing = [".polymrc", ".polymer-hook-stamp"].filter(
+    (entry) => !lines.includes(entry),
+  );
+  if (missing.length === 0) return false;
   const prefix = existing === "" || existing.endsWith("\n") ? "" : "\n";
-  writeFileSync(path, `${existing}${prefix}.polymrc\n`);
+  writeFileSync(path, `${existing}${prefix}${missing.join("\n")}\n`);
   return true;
 }
 
@@ -413,6 +436,13 @@ async function main() {
   if (!server || !name) fail(2, `missing required flags\n${usage()}`);
   if (!/^https?:\/\//.test(server)) {
     fail(2, `--server must be an http(s) URL, got ${JSON.stringify(server)}`);
+  }
+  if (client === "claude") {
+    try {
+      assertShellSafe(dir);
+    } catch (err) {
+      fail(2, err.message);
+    }
   }
   mkdirSync(dir, { recursive: true });
 
@@ -445,6 +475,7 @@ async function main() {
         config: configPath,
         env_var: "POLYMER_SESSION_TOKEN",
         gitignore_touched: gitignoreTouched,
+        hooks: hooksPath(dir, client),
       }),
     );
     return;
@@ -499,6 +530,7 @@ async function main() {
       config: configPath,
       env_var: "POLYMER_SESSION_TOKEN",
       gitignore_touched: gitignoreTouched,
+      hooks: hooksPath(dir, client),
     }),
   );
 }
