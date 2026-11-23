@@ -10,9 +10,8 @@ import {
 /**
  * Loose-end A: `disabled` is an explicit admin revocation of an
  * agent's write agency, so every task/comment mutation rejects it
- * with `unauthorized`. Reads stay open (they cannot mutate, and the
- * disable path deliberately keeps sessions authenticating so the
- * specific rejection codes stay reachable). `disconnected` is NOT
+ * with `unauthorized`. Admin disable also revokes credentials, so this
+ * is the backstop for a request already past authentication. `disconnected` is NOT
  * gated — a slow-but-legitimate agent heartbeats back to life, and
  * gating it would turn every network blip into a write outage.
  * Unknown agents fall through to each mutation's own not-found

@@ -51,8 +51,8 @@ import {
  * 12. disabling a 1000+ subtree mid telemetry-flood → completes with
  *     every agent disabled and coordination pings unaffected
  *     (this file).
- * 13. parent disable mid-lease → heartbeat `unauthorized`, spawn
- *     `parent_disabled`, every task/comment mutation `unauthorized`,
+ * 13. parent disable mid-lease → the subtree's credentials are revoked
+ *     (`invalid_token`),
  *     while the released lease stays immediately claimable by an
  *     outsider (this file; status-gating closed the loop left open
  *     at component 32).
@@ -357,35 +357,12 @@ describe("failure/chaos (component 32)", () => {
           ((await res.json()) as Record<string, unknown>)["complete"],
         ).toBe(true);
 
-        // Enforcement lives at the status gate: heartbeat and spawn
-        // reject, and (since the follow-up slice) so does every
-        // task/comment mutation — while the released lease stays
+        // Disable revokes the subtree's credentials: the child cannot
+        // authenticate at all, while the released lease stays
         // immediately claimable by an outsider (lease-governed).
-        const childDenied = await withAuthedClients(
-          app,
-          [spawned.childToken],
-          async ([client]) => {
-            const beat = (await client.callTool({
-              name: "send_heartbeat",
-              arguments: {},
-            })) as unknown as { isError?: boolean };
-            const spawn = (await client.callTool({
-              name: "register_subagent",
-              arguments: { name: "grandchild", role: "coder" },
-            })) as unknown as { isError?: boolean };
-            const claim = (await client.callTool({
-              name: "claim_task",
-              arguments: { task_id: spawned.taskId },
-            })) as unknown as { isError?: boolean };
-            return { beat, spawn, claim };
-          },
-        );
-        expect(childDenied.beat.isError).toBe(true);
-        expect(JSON.stringify(childDenied.beat)).toContain("unauthorized");
-        expect(childDenied.spawn.isError).toBe(true);
-        expect(JSON.stringify(childDenied.spawn)).toContain("parent_disabled");
-        expect(childDenied.claim.isError).toBe(true);
-        expect(JSON.stringify(childDenied.claim)).toContain("unauthorized");
+        await expect(
+          withAuthedClients(app, [spawned.childToken], async () => undefined),
+        ).rejects.toThrow();
         const [outsider] = await registerAgentsOn(app, ["chaos-outsider"]);
         await withAuthedClients(app, [outsider.token], async ([client]) => {
           const claim = (await client.callTool({
