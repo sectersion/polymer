@@ -22,6 +22,7 @@ import {
   type AdminSession,
 } from "../identity/credentials.js";
 import { listAudit, recordAudit } from "../identity/audit.js";
+import { logSecurityEvent } from "../identity/security-log.js";
 import {
   disableAgentSubtree,
   reenableAgentSubtree,
@@ -217,6 +218,7 @@ export function handleAdminRequest(
     if (pathname === "/api/auth/login" && req.method === "POST") {
       // Bucket consumed BEFORE the master credential is touched.
       if (!login.consume(ip)) {
+        logSecurityEvent("login_failed", { outcome: "rate_limited", ip });
         sendJson(res, 429, { error: "rate_limit_exceeded", retry_after: 60 });
         return true;
       }
@@ -236,7 +238,8 @@ export function handleAdminRequest(
             ?.master_credential;
           if (typeof master !== "string" || master === "") {
             // Unknown/wrong credential is indistinguishable from a
-            // missing body; failed attempts log nothing.
+            // missing body; logged without any credential material.
+            logSecurityEvent("login_failed", { outcome: "rejected", ip });
             sendJson(res, 401, { error: "invalid_token" });
             return;
           }
@@ -250,6 +253,7 @@ export function handleAdminRequest(
               ? verifyCredential(db, row.credential_id, master)
               : { ok: false as const };
           if (!verified.ok) {
+            logSecurityEvent("login_failed", { outcome: "rejected", ip });
             sendJson(res, 401, { error: "invalid_token" });
             return;
           }

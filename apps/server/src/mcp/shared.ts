@@ -22,6 +22,13 @@ export function callerAgentId(extra: unknown): string | undefined {
   return typeof agentId === "string" && agentId !== "" ? agentId : undefined;
 }
 
+/** Informational client IP for security logs; never an identity. */
+export function callerClientIp(extra: unknown): string {
+  const ip = (extra as { authInfo?: { extra?: { clientIp?: unknown } } })
+    ?.authInfo?.extra?.clientIp;
+  return typeof ip === "string" ? ip : "unknown";
+}
+
 export function registrationError(err: unknown): never {
   if (err instanceof RegistrationError) {
     throw new McpError(ErrorCode.InvalidRequest, err.code);

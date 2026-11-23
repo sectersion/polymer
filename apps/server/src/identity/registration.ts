@@ -33,6 +33,8 @@ export class RegistrationError extends Error {
       | "parent_disabled"
       | "rate_limit_exceeded",
     readonly retryAfter?: number,
+    /** Set only on `token_already_used`: the DB row's credential id. */
+    readonly credentialId?: string,
   ) {
     super(code);
     this.name = "RegistrationError";
@@ -55,7 +57,11 @@ export function registerAgent(
     throw new RegistrationError("invalid_token");
   }
   if (row["status"] !== "active") {
-    throw new RegistrationError("token_already_used");
+    throw new RegistrationError(
+      "token_already_used",
+      undefined,
+      row["credential_id"] as string,
+    );
   }
   const expiresAt = row["expires_at"] as string | null;
   if (expiresAt !== null && Date.now() >= Date.parse(expiresAt)) {
@@ -72,7 +78,11 @@ export function registerAgent(
       )
       .run(input.initTokenId);
     if (consumed.changes !== 1) {
-      throw new RegistrationError("token_already_used");
+      throw new RegistrationError(
+        "token_already_used",
+        undefined,
+        input.initTokenId,
+      );
     }
     let agentId: string;
     try {

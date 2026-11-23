@@ -20,6 +20,7 @@ import { createLeaseNotifier, runLivenessSweep } from "../identity/watchdog.js";
 import { handleRestRequest } from "./rest.js";
 import { handleTelemetryRequest } from "./telemetry.js";
 import { extractBearerToken } from "../identity/auth.js";
+import { logSecurityEvent } from "../identity/security-log.js";
 import {
   RefreshError,
   refreshReconnect,
@@ -354,15 +355,11 @@ export async function createPolymerServer(
           if (err instanceof RefreshError) {
             if (err.code === "reconnect_already_used") {
               // Security event: no secret material, identifiers only.
-              console.warn(
-                JSON.stringify({
-                  event: "reconnect_already_used",
-                  credential_id: err.credentialId,
-                  agent_id: err.agentId,
-                  ip: clientIpFor(req),
-                  at: new Date().toISOString(),
-                }),
-              );
+              logSecurityEvent("reconnect_already_used", {
+                credential_id: err.credentialId,
+                agent_id: err.agentId,
+                ip: clientIpFor(req),
+              });
             }
             jsonResponse(res, 401, { error: err.code });
             return;
@@ -519,9 +516,18 @@ export async function createPolymerServer(
             });
             return;
           }
+          // Genuinely unauthenticated bootstrap call only (never an
+          // invalid-Bearer 401/429, which returned above): carry the
+          // client IP for security logging. Informational; identity
+          // reads only `extra.agentId`, which is absent here.
+          (req as IncomingMessage & { auth?: unknown }).auth = {
+            clientId: "",
+            extra: { clientIp: clientIpFor(req) },
+          };
           if (isRegisterAgentCall(message)) {
             const ip = clientIpFor(req);
             if (!initVerifyLimiter.consume(ip)) {
+              logSecurityEvent("otp_failed", { outcome: "rate_limited", ip });
               jsonResponse(res, 429, {
                 error: "rate_limit_exceeded",
                 retry_after: 60,
