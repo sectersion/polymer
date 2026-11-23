@@ -67,7 +67,9 @@ upgrades a legacy http `.mcp.json` entry to this shape. The installer
 also leaves a marker-delimited Polymer section in `AGENTS.md` so an
 agent launched with no prompt discovers the managed connection and
 uses the preconfigured `polymer` tools instead of hand-rolling
-clients.
+clients. With `--client claude` it also adds a
+marker-delimited `@AGENTS.md` import to `CLAUDE.md` (Claude Code does
+not read `AGENTS.md`), appended to any existing file, never overwriting it.
 
 ## Tool lifecycle
 
