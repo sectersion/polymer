@@ -136,15 +136,64 @@ async function enroll(server, mcpPath, { initTokenId, initToken, name, role }) {
   return content;
 }
 
-function writeMcpJson(dir, server, client) {
+function writeMcpJson(dir, server) {
   const template = readFileSync(join(HERE, "mcp.json.template"), "utf8");
-  writeFileSync(
-    join(dir, ".mcp.json"),
-    `${template
+  const desired = JSON.parse(
+    template
       .replaceAll("${POLYMER_SERVER}", server)
-      .replaceAll("${MCP_TYPE}", client === "claude" ? "http" : "remote")
-      .trim()}\n`,
+      .replaceAll("${MCP_TYPE}", "http"),
+  ).mcpServers.polymer;
+  const path = join(dir, ".mcp.json");
+  const config = readJsonObject(path);
+  const servers = (config.mcpServers ??= {});
+  if (
+    typeof servers !== "object" ||
+    servers === null ||
+    Array.isArray(servers)
+  ) {
+    throw new Error(`${path}: "mcpServers" is not an object`);
+  }
+  setPolymerEntry(servers, desired, path);
+  writeFileSync(
+    path,
+    `${JSON.stringify(config, null, 2)}
+`,
   );
+  return path;
+}
+
+/** Parse an existing JSON(C) config; a missing or empty file is `{}`. */
+function readJsonObject(path) {
+  let config = {};
+  if (existsSync(path)) {
+    const text = readFileSync(path, "utf8");
+    if (text.trim() !== "") {
+      try {
+        config = JSON.parse(path.endsWith(".jsonc") ? stripJsonc(text) : text);
+      } catch (err) {
+        throw new Error(`cannot parse ${path}: ${err.message}`);
+      }
+    }
+  }
+  if (typeof config !== "object" || config === null || Array.isArray(config)) {
+    throw new Error(`${path} does not contain a JSON object`);
+  }
+  return config;
+}
+
+/** Set `servers.polymer`; a different existing entry is an error, never a clobber. */
+function setPolymerEntry(servers, desired, path) {
+  const existing = servers.polymer;
+  if (
+    existing !== undefined &&
+    JSON.stringify(existing) !== JSON.stringify(desired)
+  ) {
+    throw new Error(
+      `${path} already defines a different "polymer" MCP server entry; ` +
+        "review it by hand or remove it, then rerun polymer-install",
+    );
+  }
+  servers.polymer = desired;
 }
 
 /**
@@ -196,20 +245,7 @@ function findOpencodeConfig(dir) {
 function writeOpencodeConfig(dir) {
   const desired = opencodeEntry(dir);
   const path = findOpencodeConfig(dir) ?? join(dir, "opencode.json");
-  let config = {};
-  if (existsSync(path)) {
-    const text = readFileSync(path, "utf8");
-    if (text.trim() !== "") {
-      try {
-        config = JSON.parse(path.endsWith(".jsonc") ? stripJsonc(text) : text);
-      } catch (err) {
-        throw new Error(`cannot parse ${path}: ${err.message}`);
-      }
-    }
-  }
-  if (typeof config !== "object" || config === null || Array.isArray(config)) {
-    throw new Error(`${path} does not contain a JSON object`);
-  }
+  const config = readJsonObject(path);
   config.$schema ??= "https://opencode.ai/config.json";
   const mcp = (config.mcp ??= {});
   if (typeof mcp !== "object" || mcp === null || Array.isArray(mcp)) {
@@ -223,24 +259,14 @@ function writeOpencodeConfig(dir) {
   ) {
     throw new Error(`${path}: "mcp.servers" is not an object`);
   }
-  const existing = servers.polymer;
-  if (
-    existing !== undefined &&
-    JSON.stringify(existing) !== JSON.stringify(desired)
-  ) {
-    throw new Error(
-      `${path} already defines a different "polymer" MCP server entry; ` +
-        "review it by hand or remove it, then rerun polymer-install",
-    );
-  }
-  servers.polymer = desired;
+  setPolymerEntry(servers, desired, path);
   writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
   return path;
 }
 
 function writeClientConfig(dir, server, client) {
   return client === "claude"
-    ? writeMcpJson(dir, server, client)
+    ? writeMcpJson(dir, server)
     : writeOpencodeConfig(dir);
 }
 

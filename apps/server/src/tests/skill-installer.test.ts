@@ -322,6 +322,67 @@ describe("skill installer (component 30)", () => {
     }
   }, 60000);
 
+  it("--client claude merges into an existing .mcp.json, never clobbering other servers, a different polymer entry, or malformed files", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-skill-"),
+    });
+    let n = 0;
+    const run = async (dir: string, content: string) => {
+      const path = join(dir, ".mcp.json");
+      if (content) writeFileSync(path, content);
+      const { credential, secret } = mintCredential(app.db!, { type: "init" });
+      const res = await install(app, dir, [
+        "--name",
+        `mcp-merge-${++n}`,
+        "--init-token-id",
+        credential.credential_id,
+        "--init-token",
+        secret,
+        "--client",
+        "claude",
+      ]);
+      return { res, path };
+    };
+    try {
+      const dir = tempRepo();
+      const other = { type: "http", url: "https://mcp.other.example/mcp" };
+      const { res, path } = await run(
+        dir,
+        JSON.stringify({ keep: 1, mcpServers: { other } }),
+      );
+      expect(res.status).toBe(0);
+      const merged = JSON.parse(readFileSync(path, "utf8")) as Record<
+        string,
+        Record<string, unknown>
+      >;
+      expect(merged["keep"]).toBe(1);
+      expect(merged["mcpServers"]?.["other"]).toEqual(other);
+      expect(merged["mcpServers"]?.["polymer"]).toBeDefined();
+
+      // Rerun is idempotent.
+      const before = readFileSync(path, "utf8");
+      expect((await run(dir, "")).res.status).toBe(0);
+      expect(readFileSync(path, "utf8")).toBe(before);
+
+      // A different polymer entry is refused and the file is untouched.
+      const conflict = JSON.stringify({
+        mcpServers: { polymer: { type: "http", url: "https://x.example/mcp" } },
+      });
+      const c = await run(tempRepo(), conflict);
+      expect(c.res.status).toBe(1);
+      expect(c.res.stderr).toContain('different "polymer"');
+      expect(readFileSync(c.path, "utf8")).toBe(conflict);
+
+      // Malformed JSON is refused and the file is untouched.
+      const m = await run(tempRepo(), "{ not json");
+      expect(m.res.status).toBe(1);
+      expect(m.res.stderr).toContain("cannot parse");
+      expect(readFileSync(m.path, "utf8")).toBe("{ not json");
+    } finally {
+      await app.close();
+    }
+  }, 60000);
+
   it("polymer-proxy bridges a real stdio client using .polymrc credentials", async () => {
     const app = await listen("127.0.0.1", 0, {
       databasePath: tempDbPath("polymer-skill-"),
