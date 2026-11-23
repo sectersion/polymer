@@ -3,7 +3,12 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { PolymerDatabase } from "../database/db.js";
 import type { EventBus } from "../http/events.js";
-import { registerAgent, registerSubagent } from "../identity/registration.js";
+import {
+  RegistrationError,
+  registerAgent,
+  registerSubagent,
+} from "../identity/registration.js";
+import { logSecurityEvent } from "../identity/security-log.js";
 import { getAgentById, listAgentsPage } from "../identity/agents.js";
 import {
   HeartbeatUnauthorizedError,
@@ -12,6 +17,7 @@ import {
 import { AgentNotFoundError } from "../identity/agents.js";
 import {
   callerAgentId,
+  callerClientIp,
   heartbeatSchema,
   registrationError,
   taskToolError,
@@ -73,6 +79,17 @@ export function registerAgentTools(
         });
         return toolResult({ ...out });
       } catch (err) {
+        if (err instanceof RegistrationError) {
+          const ip = callerClientIp(extra);
+          if (err.code === "invalid_token") {
+            logSecurityEvent("otp_failed", { outcome: "rejected", ip });
+          } else if (err.code === "token_already_used") {
+            logSecurityEvent("init_token_already_used", {
+              credential_id: err.credentialId,
+              ip,
+            });
+          }
+        }
         registrationError(err);
       }
     },
