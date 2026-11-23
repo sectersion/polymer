@@ -9,7 +9,8 @@
     "polymer-status": "./status.mjs",
     "polymer-refresh": "./refresh.mjs",
     "polymer-setup": "./setup.mjs",
-    "polymer-proxy": "./proxy.mjs"
+    "polymer-proxy": "./proxy.mjs",
+    "polymer-hook": "./hook.mjs"
   },
   "files": [
     "install.mjs",
@@ -18,11 +19,12 @@
     "setup.mjs",
     "config.mjs",
     "proxy.mjs",
+    "hook.mjs",
     "SKILL.md"
   ],
   "scripts": {
     "build": "echo \"@polymer/skill: static files, nothing to build\"",
-    "test": "node --check install.mjs && node --check status.mjs && node --check refresh.mjs && node --check setup.mjs && node --check config.mjs && node --check proxy.mjs",
+    "test": "node --check install.mjs && node --check status.mjs && node --check refresh.mjs && node --check setup.mjs && node --check config.mjs && node --check proxy.mjs && node --check hook.mjs",
     "lint": "eslint .",
     "typecheck": "echo \"@polymer/skill: plain JavaScript, nothing to typecheck\""
   },
