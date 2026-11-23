@@ -48,6 +48,10 @@ export async function handleOtlpRequest(
   db: PolymerDatabase | null,
   options: OtelOptions,
   enqueue: (batch: QueuedBatch) => boolean,
+  verifyBearer: (
+    req: IncomingMessage,
+    token: string,
+  ) => ReturnType<typeof verifySessionToken> | { limited: true },
 ): Promise<boolean> {
   if (url.pathname !== `${basePath(options.endpoint)}/v1/traces`) {
     return false;
@@ -65,7 +69,11 @@ export async function handleOtlpRequest(
     return true;
   }
   const token = extractBearerToken(req.headers["authorization"]);
-  const session = token === undefined ? null : verifySessionToken(db, token);
+  const session = token === undefined ? null : verifyBearer(req, token);
+  if (session !== null && "limited" in session) {
+    sendJson(res, 429, { error: "rate_limit_exceeded", retry_after: 60 });
+    return true;
+  }
   if (session === null || !session.ok) {
     sendJson(res, 401, { error: "invalid_token" });
     return true;

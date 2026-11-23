@@ -7,7 +7,7 @@
 class FixedWindowLimiter {
   private readonly perKey = new Map<
     string,
-    { windowStart: number; count: number }
+    { windowStart: number; count: number; globalStart: number }
   >();
   private globalWindowStart = 0;
   private globalCount = 0;
@@ -42,13 +42,35 @@ class FixedWindowLimiter {
     const slot = this.perKey.get(key);
     if (slot === undefined || t - slot.windowStart >= this.windowMs) {
       this.pruneIfWorthwhile(t);
-      this.perKey.set(key, { windowStart: t, count: 1 });
+      this.perKey.set(key, {
+        windowStart: t,
+        count: 1,
+        globalStart: this.globalWindowStart,
+      });
     } else {
       if (slot.count >= this.perKeyLimit) return false;
       slot.count += 1;
+      slot.globalStart = this.globalWindowStart;
     }
     this.globalCount += 1;
     return true;
+  }
+
+  /** Give back one unit taken by a successful `consume(key)`. Each
+   * count is decremented only while ITS OWN window has not rolled (a
+   * rolled window is a fresh budget: crediting it would double-credit),
+   * never below zero. Unknown or rolled key: no-op, global untouched. */
+  refund(key: string): void {
+    const t = this.now();
+    const slot = this.perKey.get(key);
+    if (slot === undefined || t - slot.windowStart >= this.windowMs) return;
+    if (slot.count > 0) slot.count -= 1;
+    // The unit counts against the global window it was taken in; if the
+    // global window has rolled since, crediting the new one would
+    // double-credit.
+    if (slot.globalStart === this.globalWindowStart && this.globalCount > 0) {
+      this.globalCount -= 1;
+    }
   }
 }
 

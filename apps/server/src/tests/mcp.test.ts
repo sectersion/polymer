@@ -414,6 +414,92 @@ describe("MCP transport (component 2, real session auth)", () => {
     }
   });
 
+  it("invalid Bearer probes are IP-budgeted: 401 until the budget is spent, then 429 (never 401)", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath(),
+      mcpRateLimitPerMin: 3,
+    });
+    try {
+      const bad = mcpHeaders("deadbeef.0123456789abcdef0123456789abcdef");
+      for (let i = 0; i < 3; i++) {
+        const res = await rawPing(app.url, bad);
+        expect(res.status).toBe(401);
+        expect(await res.json()).toEqual({
+          error: "invalid_token",
+          reason: "invalid",
+        });
+      }
+      const limited = await rawPing(app.url, bad);
+      expect(limited.status).toBe(429);
+      expect(await limited.json()).toEqual({
+        error: "rate_limit_exceeded",
+        retry_after: 60,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("valid agents sharing one IP are not starved by the probe charge", async () => {
+    const dbPath = tempDbPath();
+    const a = await registerSessionToken(dbPath, "agent-a");
+    const b = await registerSessionToken(dbPath, "agent-b");
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: dbPath,
+      mcpRateLimitPerMin: 5,
+    });
+    try {
+      // Each agent spends exactly its own 5: initialize + 4 pings.
+      for (const t of [a.sessionToken, b.sessionToken]) {
+        const auth = mcpHeaders(t);
+        const init = await rawInitialize(app.url, auth);
+        expect(init.status).toBe(200);
+        const sid = init.headers.get("mcp-session-id")!;
+        await init.body?.cancel();
+        for (let i = 0; i < 4; i++) {
+          const ok = await rawPing(app.url, { ...auth, "mcp-session-id": sid });
+          expect(ok.status).toBe(200);
+          await ok.body?.cancel();
+        }
+        // The 6th is the AGENT's own cap, proving per-agent accounting.
+        const over = await rawPing(app.url, { ...auth, "mcp-session-id": sid });
+        expect(over.status).toBe(429);
+        await over.body?.cancel();
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("invalid probes and valid traffic from one IP coexist within budget", async () => {
+    const dbPath = tempDbPath();
+    const a = await registerSessionToken(dbPath, "agent-a");
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: dbPath,
+      mcpRateLimitPerMin: 4,
+    });
+    try {
+      const bad = mcpHeaders("deadbeef.0123456789abcdef0123456789abcdef");
+      for (let i = 0; i < 2; i++) {
+        const res = await rawPing(app.url, bad);
+        expect(res.status).toBe(401);
+        await res.body?.cancel();
+      }
+      const auth = mcpHeaders(a.sessionToken);
+      const init = await rawInitialize(app.url, auth);
+      expect(init.status).toBe(200);
+      const sid = init.headers.get("mcp-session-id")!;
+      await init.body?.cancel();
+      for (let i = 0; i < 3; i++) {
+        const ok = await rawPing(app.url, { ...auth, "mcp-session-id": sid });
+        expect(ok.status).toBe(200);
+        await ok.body?.cancel();
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
   it("session cap rejects new handshakes but keeps existing sessions usable", async () => {
     const dbPath = tempDbPath();
     const { sessionToken } = await registerSessionToken(dbPath, "agent-a");

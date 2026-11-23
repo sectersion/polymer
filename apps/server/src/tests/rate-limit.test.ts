@@ -73,6 +73,68 @@ describe("fixed-window limiter mechanics (audit #27)", () => {
     expect(limiter.consume("cred-again")).toBe(true);
   });
 
+  it("refund returns one unit: consume to the cap, refund, next consume succeeds", () => {
+    const limiter = new InitVerifyLimiter(2, 1000, 1000, () => 0);
+    expect(limiter.consume("ip")).toBe(true);
+    expect(limiter.consume("ip")).toBe(true);
+    expect(limiter.consume("ip")).toBe(false);
+    limiter.refund("ip");
+    expect(limiter.consume("ip")).toBe(true);
+    expect(limiter.consume("ip")).toBe(false);
+  });
+
+  it("refund also returns the global unit, and an unknown key is a no-op", () => {
+    const limiter = new InitVerifyLimiter(5, 2, 1000, () => 0);
+    limiter.refund("never-seen");
+    expect(limiter.consume("a")).toBe(true);
+    expect(limiter.consume("b")).toBe(true);
+    expect(limiter.consume("c")).toBe(false); // global 2/2
+    limiter.refund("never-seen"); // must not free the global slot
+    expect(limiter.consume("c")).toBe(false);
+    limiter.refund("a");
+    expect(limiter.consume("c")).toBe(true);
+  });
+
+  it("refund never goes below zero", () => {
+    const limiter = new InitVerifyLimiter(2, 100, 1000, () => 0);
+    expect(limiter.consume("k")).toBe(true);
+    limiter.refund("k");
+    limiter.refund("k");
+    expect(limiter.consume("k")).toBe(true);
+    expect(limiter.consume("k")).toBe(true);
+    expect(limiter.consume("k")).toBe(false); // exactly 2, not 3
+  });
+
+  it("refund after the key window rolled is a no-op (no double credit)", () => {
+    let now = 0;
+    const limiter = new InitVerifyLimiter(5, 2, 1000, () => now);
+    expect(limiter.consume("a")).toBe(true);
+    now = 1000; // key and global windows both elapsed
+    limiter.refund("a");
+    // Fresh global window holds exactly 2; a spurious credit/negative
+    // would admit 3.
+    expect(limiter.consume("b")).toBe(true);
+    expect(limiter.consume("c")).toBe(true);
+    expect(limiter.consume("d")).toBe(false);
+  });
+
+  it("refund when the global window rolled but the key window is live credits the key only", () => {
+    let now = 0;
+    const limiter = new InitVerifyLimiter(5, 2, 1000, () => now);
+    expect(limiter.consume("x")).toBe(true); // global window @0
+    now = 600;
+    expect(limiter.consume("k")).toBe(true); // key window @600, global 2/2
+    now = 1000; // global window rolled, k's key window still live
+    expect(limiter.consume("y")).toBe(true); // new global window: 1/2
+    limiter.refund("k");
+    // k's unit belonged to the OLD global window: the new one stays 1/2.
+    expect(limiter.consume("z")).toBe(true); // 2/2
+    expect(limiter.consume("w")).toBe(false);
+    // ...but the key bucket did get its unit back.
+    limiter.refund("z");
+    expect(limiter.consume("k")).toBe(true);
+  });
+
   it("each limiter ships its documented budgets", () => {
     let now = 0;
     const login = new LoginLimiter(60_000, () => now);
