@@ -15,6 +15,9 @@
  *   claude (`mcpServers.polymer`, merged). Both run `polymer-proxy`
  *   over stdio, which reads the Bearer from `.polymrc`: no secret in
  *   the shell environment, argv, or config.
+ * - `.claude/settings.local.json` (--client claude only): merged
+ *   SessionStart/PostToolUse/SessionEnd hooks running `hook.mjs`, so
+ *   a session heartbeats without the model calling any tool.
  * - `.gitignore`: gains a `.polymrc` line (exact-line match, so
  *   reruns never duplicate it).
  * - `AGENTS.md`: a marker-delimited Polymer section telling the agent
@@ -279,10 +282,46 @@ function writeOpencodeConfig(dir) {
   return path;
 }
 
+/**
+ * Merge Polymer hook entries into project `.claude/settings.local.json`
+ * (gitignored by Claude Code; the commands embed machine-absolute
+ * paths). Existing settings and other hooks are preserved; an entry
+ * already present verbatim is not duplicated.
+ */
+function writeClaudeHooks(dir) {
+  const path = join(dir, ".claude", "settings.local.json");
+  const config = readJsonObject(path);
+  const hooks = (config.hooks ??= {});
+  if (typeof hooks !== "object" || hooks === null || Array.isArray(hooks)) {
+    throw new Error(`${path}: "hooks" is not an object`);
+  }
+  const script = join(HERE, "hook.mjs");
+  for (const [event, mode] of [
+    ["SessionStart", "session"],
+    ["PostToolUse", "tool"],
+    ["SessionEnd", "end"],
+  ]) {
+    const command = `"${process.execPath}" "${script}" --dir "${dir}" ${mode}`;
+    const groups = (hooks[event] ??= []);
+    if (!Array.isArray(groups)) {
+      throw new Error(`${path}: "hooks.${event}" is not an array`);
+    }
+    const present = groups.some((g) =>
+      g?.hooks?.some?.((h) => h?.command === command),
+    );
+    if (!present) {
+      groups.push({ hooks: [{ type: "command", command, timeout: 10 }] });
+    }
+  }
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
+}
+
 function writeClientConfig(dir, server, client, mcpPath) {
-  return client === "claude"
-    ? writeMcpJson(dir, server, mcpPath)
-    : writeOpencodeConfig(dir);
+  if (client !== "claude") return writeOpencodeConfig(dir);
+  const path = writeMcpJson(dir, server, mcpPath);
+  writeClaudeHooks(dir);
+  return path;
 }
 
 function agentsMdBlock(server) {

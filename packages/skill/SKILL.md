@@ -74,8 +74,9 @@ not read `AGENTS.md`), appended to any existing file, never overwriting it.
 ## Tool lifecycle
 
 `register_agent` (once, via the installer) → `send_heartbeat` every
-~60s (well under the 300s default timeout; nothing else feeds
-liveness) → `claim_task` → work → `post_comment` → status to
+~60s (well under the 300s default timeout; under Claude Code the
+installer's hooks in `.claude/settings.local.json` also beat on session
+start, tool use and session end, but never claim or complete) → `claim_task` → work → `post_comment` → status to
 `done`/`failed`.
 
 - Identity always comes from the credential. There is no
