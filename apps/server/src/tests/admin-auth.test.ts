@@ -1236,6 +1236,25 @@ describe("administrator authentication (component 19)", () => {
         .db!.prepare("SELECT status FROM credentials WHERE credential_id = ?")
         .get(credentialId) as { status: string };
       expect(row.status).toBe("revoked");
+
+      // The master is never revocable here: 404, row stays active.
+      const masterId = (
+        app
+          .db!.prepare(
+            "SELECT credential_id FROM credentials WHERE type = 'master'",
+          )
+          .get() as { credential_id: string }
+      ).credential_id;
+      const refused = await adminFetch(app, `/api/tokens/${masterId}`, {
+        cookie,
+        csrf,
+        method: "DELETE",
+      });
+      expect(refused.status).toBe(404);
+      const masterRow = app
+        .db!.prepare("SELECT status FROM credentials WHERE credential_id = ?")
+        .get(masterId) as { status: string };
+      expect(masterRow.status).toBe("active");
     } finally {
       await app.close();
     }

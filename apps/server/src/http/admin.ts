@@ -397,10 +397,11 @@ export function handleAdminRequest(
       }
       const credentialId = pathname.slice("/api/tokens/".length);
       // Revocation is idempotent on existing rows (a used OTP is
-      // already dead; revoking it changes nothing observable).
+      // already dead; revoking it changes nothing observable). The master
+      // is excluded (404): its lifecycle belongs to rotate-master.
       const deleted = db
         .prepare(
-          "UPDATE credentials SET status = 'revoked' WHERE credential_id = ?",
+          "UPDATE credentials SET status = 'revoked' WHERE credential_id = ? AND type != 'master'",
         )
         .run(credentialId);
       if (deleted.changes !== 1) {
