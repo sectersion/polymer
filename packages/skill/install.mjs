@@ -20,6 +20,8 @@
  * - `AGENTS.md`: a marker-delimited Polymer section telling the agent
  *   a managed MCP connection exists — so it uses the preconfigured
  *   `polymer` tools instead of hand-rolling HTTP clients.
+ * - `CLAUDE.md` (--client claude only): a marker-delimited `@AGENTS.md`
+ *   import, since Claude Code does not read AGENTS.md.
  */
 
 import {
@@ -302,14 +304,21 @@ function agentsMdBlock(server) {
   ].join("\n");
 }
 
+// Claude Code reads CLAUDE.md, not AGENTS.md; its `@path` import keeps
+// the instructions single-sourced in AGENTS.md.
+const CLAUDE_MD_BLOCK = [
+  "<!-- polymer:start -->",
+  "@AGENTS.md",
+  "<!-- polymer:end -->",
+].join("\n");
+
 /**
  * Append (or refresh, between exact markers) the Polymer section in
- * the target repo's AGENTS.md so an unprimed agent discovers the
+ * `file` of the target repo so an unprimed agent discovers the
  * managed connection without being told in a prompt.
  */
-function ensureAgentsMd(dir, server) {
-  const path = join(dir, "AGENTS.md");
-  const block = agentsMdBlock(server);
+function ensureBlock(dir, file, block) {
+  const path = join(dir, file);
   const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
   const re = /<!-- polymer:start -->[\s\S]*?<!-- polymer:end -->/;
   const match = existing.match(re);
@@ -326,6 +335,11 @@ function ensureAgentsMd(dir, server) {
         : "\n\n";
   writeFileSync(path, `${existing}${prefix}${block}\n`);
   return true;
+}
+
+function ensureInstructions(dir, server, client) {
+  ensureBlock(dir, "AGENTS.md", agentsMdBlock(server));
+  if (client === "claude") ensureBlock(dir, "CLAUDE.md", CLAUDE_MD_BLOCK);
 }
 
 function ensureGitignore(dir) {
@@ -376,7 +390,7 @@ async function main() {
     let configPath;
     try {
       configPath = writeClientConfig(dir, server, client, mcpPath);
-      ensureAgentsMd(dir, server);
+      ensureInstructions(dir, server, client);
     } catch (err) {
       fail(1, err.message);
     }
@@ -429,7 +443,7 @@ async function main() {
   let configPath;
   try {
     configPath = writeClientConfig(dir, server, client, mcpPath);
-    ensureAgentsMd(dir, server);
+    ensureInstructions(dir, server, client);
   } catch (err) {
     fail(1, err.message);
   }

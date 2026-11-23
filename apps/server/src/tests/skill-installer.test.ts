@@ -1,5 +1,11 @@
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -131,6 +137,8 @@ describe("skill installer (component 30)", () => {
       expect(agentsMd.split("<!-- polymer:start -->").length - 1).toBe(1);
       expect(agentsMd).toContain(app.url);
       expect(agentsMd).toContain("Do not hand-roll HTTP");
+      // OpenCode path writes no CLAUDE.md.
+      expect(existsSync(join(dir, "CLAUDE.md"))).toBe(false);
 
       // `.gitignore` covers `.polymrc` exactly once…
       const gitignore = readFileSync(join(dir, ".gitignore"), "utf8");
@@ -243,6 +251,55 @@ describe("skill installer (component 30)", () => {
       } finally {
         await client.close();
       }
+
+      // CLAUDE.md imports AGENTS.md via one managed block; no secret.
+      const claudeMd = readFileSync(join(dir, "CLAUDE.md"), "utf8");
+      expect(claudeMd).toContain("@AGENTS.md");
+      expect(claudeMd.split("<!-- polymer:start -->").length - 1).toBe(1);
+      expect(claudeMd).not.toContain(
+        (
+          JSON.parse(readFileSync(join(dir, ".polymrc"), "utf8")) as {
+            session_token: string;
+          }
+        ).session_token,
+      );
+      // Rerun is idempotent; a stale block is refreshed in place and
+      // surrounding user content is preserved.
+      writeFileSync(
+        join(dir, "CLAUDE.md"),
+        "# mine\n\n<!-- polymer:start -->\nstale\n<!-- polymer:end -->\n\ntail\n",
+      );
+      const rerun = await install(app, dir, [
+        "--name",
+        "claude-agent",
+        "--client",
+        "claude",
+      ]);
+      expect(rerun.status).toBe(0);
+      const claudeMd2 = readFileSync(join(dir, "CLAUDE.md"), "utf8");
+      expect(claudeMd2).toBe(
+        "# mine\n\n<!-- polymer:start -->\n@AGENTS.md\n<!-- polymer:end -->\n\ntail\n",
+      );
+      // Existing CLAUDE.md without a block is appended to, never clobbered.
+      const dir2 = tempRepo();
+      writeFileSync(join(dir2, "CLAUDE.md"), "# keep me\n");
+      const { credential: c2, secret: s2 } = mintCredential(app.db!, {
+        type: "init",
+      });
+      const appended = await install(app, dir2, [
+        "--name",
+        "claude-agent-2",
+        "--init-token-id",
+        c2.credential_id,
+        "--init-token",
+        s2,
+        "--client",
+        "claude",
+      ]);
+      expect(appended.status).toBe(0);
+      expect(readFileSync(join(dir2, "CLAUDE.md"), "utf8")).toBe(
+        "# keep me\n\n<!-- polymer:start -->\n@AGENTS.md\n<!-- polymer:end -->\n",
+      );
 
       const bogus = await install(app, tempRepo(), [
         "--name",
