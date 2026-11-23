@@ -36,7 +36,7 @@ import {
   openDatabase,
   type PolymerDatabase,
 } from "../database/db.js";
-import { MAX_JSON_BODY_BYTES, MAX_REQUEST_BYTES, readBody } from "./common.js";
+import { MAX_JSON_BODY_BYTES, readBody } from "./common.js";
 
 const HEALTH_PATH = "/health";
 
@@ -181,6 +181,23 @@ export async function createPolymerServer(
       req.headers["x-forwarded-for"],
       trustedProxies,
     );
+  /** Bearer verification under the per-IP probe budget. The unit is
+   * consumed BEFORE the lookup (so an invalid-Bearer flood is
+   * rate-limited, never free) and refunded when the credential turns
+   * out valid (so agents sharing one IP are never starved by each
+   * other's traffic). consume -> verify -> refund MUST stay
+   * synchronous with no await in between: the refund is only correct
+   * because nothing can interleave. */
+  const verifyBearerBudgeted = (
+    req: IncomingMessage,
+    token: string,
+  ): ReturnType<typeof verifySessionToken> | { limited: true } => {
+    const key = `ip:${clientIpFor(req)}`;
+    if (!mcpLimiter.consume(key)) return { limited: true };
+    const session = verifySessionToken(db!, token);
+    if (session.ok) mcpLimiter.refund(key);
+    return session;
+  };
   // Component 23: the bounded telemetry queue. One per server; the
   // OTLP handler enqueues validated batches and the timer flushes
   // them to SQLite. Unref'd so tests never hang on the handle.
@@ -311,7 +328,7 @@ export async function createPolymerServer(
           });
           return;
         }
-        const body = await readBody(req, MAX_REQUEST_BYTES);
+        const body = await readBody(req, MAX_JSON_BODY_BYTES);
         if (body.kind === "too-large") {
           jsonResponse(
             res,
@@ -383,6 +400,7 @@ export async function createPolymerServer(
               DEFAULT_OTEL_OPTIONS.batchMaxSpans,
           },
           (batch) => telemetryQueue.enqueue(batch),
+          verifyBearerBudgeted,
         )
       ) {
         return;
@@ -443,7 +461,14 @@ export async function createPolymerServer(
         const token = extractBearerToken(req.headers["authorization"]);
         let agentId: string | undefined;
         if (token !== undefined && db) {
-          const session = verifySessionToken(db, token);
+          const session = verifyBearerBudgeted(req, token);
+          if ("limited" in session) {
+            jsonResponse(res, 429, {
+              error: "rate_limit_exceeded",
+              retry_after: 60,
+            });
+            return;
+          }
           if (!session.ok) {
             // Catalog: invalid_token is the 401 code for a missing or
             // unknown/wrong credential (unauthorized is the 403 code
@@ -506,13 +531,14 @@ export async function createPolymerServer(
           }
         }
         // MCP budget: consumed before any session work. Authenticated
-        // requests key on the validated agent id; EVERYTHING
-        // unauthenticated — the initialize handshake, bootstrap
-        // notifications, register_agent, invalid-bearer probes —
-        // consumes the source-IP budget, so probing credentials or
-        // spamming keep-alives is rate-limited, never free. Session-
-        // bound notifications from unauthenticated bootstrap clients
-        // therefore no longer count as "free" traffic.
+        // requests key on the validated agent id; unauthenticated
+        // traffic — the initialize handshake, bootstrap notifications,
+        // register_agent — consumes the source-IP budget, so spamming
+        // keep-alives is rate-limited, never free. Invalid-Bearer probes
+        // were already charged to that same IP budget above, BEFORE the
+        // credential lookup (consume-then-refund-on-success in
+        // verifyBearerBudgeted); valid Bearers got their unit back, so
+        // they spend only their own agent bucket.
         const clientIp = clientIpFor(req);
         const limitKey =
           agentId !== undefined ? `agent:${agentId}` : `ip:${clientIp}`;

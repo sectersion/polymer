@@ -184,6 +184,53 @@ describe("OTLP receiver (component 22)", () => {
     }
   });
 
+  it("invalid OTLP Bearers are IP-budgeted: 401 until the budget is spent, then 429", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-otel-"),
+      mcpRateLimitPerMin: 3,
+    });
+    try {
+      const post = () =>
+        postTraces(app.url, {
+          token: "deadbeef.cafe",
+          contentType: "application/json",
+          body: VALID_JSON_BATCH,
+        });
+      for (let i = 0; i < 3; i++) {
+        expect((await post()).status).toBe(401);
+      }
+      const limited = await post();
+      expect(limited.status).toBe(429);
+      expect(await limited.json()).toEqual({
+        error: "rate_limit_exceeded",
+        retry_after: 60,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("valid OTLP posts do not consume the IP budget", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-otel-"),
+      mcpRateLimitPerMin: 20,
+    });
+    try {
+      const [agent] = await registerAgentsOn(app, ["otel-agent"]);
+      // Far more valid posts than the IP cap: each is refunded.
+      for (let i = 0; i < 40; i++) {
+        const res = await postTraces(app.url, {
+          token: agent.token,
+          contentType: "application/json",
+          body: VALID_JSON_BATCH,
+        });
+        expect(res.status).toBe(200);
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
   it("rejects wrong content types and malformed payloads with 400", async () => {
     const app = await listen("127.0.0.1", 0, {
       databasePath: tempDbPath("polymer-otel-"),

@@ -81,10 +81,8 @@ export function mapServiceError(res: ServerResponse, err: unknown): void {
   throw err;
 }
 
-/** General request body cap: `security.maxMessageSize` (design default 10 MiB). */
-export const MAX_REQUEST_BYTES = 10 * 1024 * 1024;
 /**
- * MCP and admin JSON messages are small (tool args, JSON-RPC, form
+ * MCP, refresh and admin JSON messages are small (tool args, JSON-RPC, form
  * bodies): cap them tighter than the general limit so an
  * unauthenticated stream cannot buffer megabytes before auth
  * (design parking lot: "MCP request body size cap ... 1 MiB + 413").

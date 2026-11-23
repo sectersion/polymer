@@ -249,13 +249,28 @@ describe("Reconnect credential rotation (component 9)", () => {
     }
   });
 
-  it("oversized refresh bodies are rejected with 413 (security.maxMessageSize)", async () => {
+  it("a 900 KiB refresh body is still read: it reaches the credential check (401, not 413)", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath(),
+    });
+    try {
+      const res = await postRefresh(app.url, "deadbeef.cafe", {
+        pad: "x".repeat(900 * 1024),
+      });
+      expect(res.status).toBe(401);
+      expect(res.json["error"]).toBe("reconnect_secret_invalid");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("refresh bodies over 1 MiB are rejected with 413 payload_too_large", async () => {
     const app = await listen("127.0.0.1", 0, {
       databasePath: tempDbPath(),
     });
     try {
       const oversized = await postRefresh(app.url, "deadbeef.cafe", {
-        pad: "x".repeat(10 * 1024 * 1024),
+        pad: "x".repeat(2 * 1024 * 1024),
       });
       expect(oversized.status).toBe(413);
       expect(oversized.json["error"]).toBe("payload_too_large");
