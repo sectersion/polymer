@@ -109,6 +109,7 @@ describe("telemetry queue (component 23)", () => {
             agentId,
             spans: [span(T, S(1))],
             receivedAt: "2026-01-01T00:00:00.000Z",
+            bytes: 1,
           }),
         ).toBe(true);
         expect(
@@ -116,6 +117,7 @@ describe("telemetry queue (component 23)", () => {
             agentId,
             spans: [span(T, S(2))],
             receivedAt: "2026-01-01T00:00:01.000Z",
+            bytes: 1,
           }),
         ).toBe(true);
         expect(queue.depth()).toBe(2);
@@ -150,15 +152,30 @@ describe("telemetry queue (component 23)", () => {
       const queue = new TelemetryQueue(db, { maxBatches: 1, flushMs: 60000 });
       try {
         expect(
-          queue.enqueue({ agentId, spans: [span(T, S(1))], receivedAt: "t" }),
+          queue.enqueue({
+            agentId,
+            spans: [span(T, S(1))],
+            receivedAt: "t",
+            bytes: 1,
+          }),
         ).toBe(true);
         expect(
-          queue.enqueue({ agentId, spans: [span(T, S(2))], receivedAt: "t" }),
+          queue.enqueue({
+            agentId,
+            spans: [span(T, S(2))],
+            receivedAt: "t",
+            bytes: 1,
+          }),
         ).toBe(false);
         expect(queue.depth()).toBe(1);
         expect(queue.flush()).toBe(1);
         expect(
-          queue.enqueue({ agentId, spans: [span(T, S(2))], receivedAt: "t" }),
+          queue.enqueue({
+            agentId,
+            spans: [span(T, S(2))],
+            receivedAt: "t",
+            bytes: 1,
+          }),
         ).toBe(true);
       } finally {
         queue.stop();
@@ -178,6 +195,7 @@ describe("telemetry queue (component 23)", () => {
           agentId,
           spans: [span(T, S(1))],
           receivedAt: "t",
+          bytes: 1,
         };
         expect(queue.enqueue(batch)).toBe(true);
         expect(queue.enqueue(batch)).toBe(true);
@@ -203,12 +221,12 @@ describe("telemetry queue (component 23)", () => {
         const spansB = Array.from({ length: 400 }, (_, i) =>
           span(T, hex(400 + i)),
         );
-        expect(queue.enqueue({ agentId, spans: spansA, receivedAt: "t" })).toBe(
-          true,
-        );
-        expect(queue.enqueue({ agentId, spans: spansB, receivedAt: "t" })).toBe(
-          true,
-        );
+        expect(
+          queue.enqueue({ agentId, spans: spansA, receivedAt: "t", bytes: 1 }),
+        ).toBe(true);
+        expect(
+          queue.enqueue({ agentId, spans: spansB, receivedAt: "t", bytes: 1 }),
+        ).toBe(true);
         // 800 rows across the 500-row transaction bound: 500 + 300.
         expect(queue.flush()).toBe(800);
         expect(rowCount(db)).toBe(800);
@@ -229,7 +247,12 @@ describe("telemetry queue (component 23)", () => {
       try {
         queue.start();
         expect(
-          queue.enqueue({ agentId, spans: [span(T, S(1))], receivedAt: "t" }),
+          queue.enqueue({
+            agentId,
+            spans: [span(T, S(1))],
+            receivedAt: "t",
+            bytes: 1,
+          }),
         ).toBe(true);
         await waitFor(() => rowCount(db) === 1);
         expect(queue.depth()).toBe(0);
@@ -529,7 +552,7 @@ describe("telemetry queue (component 23)", () => {
           many(1000, 500),
         ];
         for (const spans of batches) {
-          queue.enqueue({ agentId, spans, receivedAt: "t" });
+          queue.enqueue({ agentId, spans, receivedAt: "t", bytes: 1 });
         }
         expect(flushThrows(queue)).toBe(true);
         expect(rowCount(db)).toBe(500);
@@ -557,7 +580,7 @@ describe("telemetry queue (component 23)", () => {
           800,
           new Map([[600, failing("SQLITE_FULL", () => fail)]]),
         );
-        queue.enqueue({ agentId, spans, receivedAt: "t" });
+        queue.enqueue({ agentId, spans, receivedAt: "t", bytes: 1 });
         expect(flushThrows(queue)).toBe(true);
         expect(rowCount(db)).toBe(500);
         expect(queue.depth()).toBe(1);
@@ -584,7 +607,7 @@ describe("telemetry queue (component 23)", () => {
           3,
           new Map([[1, failing("SQLITE_BUSY", () => failures++ < 10)]]),
         );
-        queue.enqueue({ agentId, spans, receivedAt: "t" });
+        queue.enqueue({ agentId, spans, receivedAt: "t", bytes: 1 });
         for (let i = 0; i < 10; i++) expect(flushThrows(queue)).toBe(true);
         expect(getTelemetryCounter(db, DROPPED_SPANS_COUNTER)).toBe(0);
         expect(rowCount(db)).toBe(0);
@@ -607,11 +630,17 @@ describe("telemetry queue (component 23)", () => {
           maxBatches: 10,
           flushMs: 60000,
         });
-        queue.enqueue({ agentId, spans: many(0, 2), receivedAt: "t" });
+        queue.enqueue({
+          agentId,
+          spans: many(0, 2),
+          receivedAt: "t",
+          bytes: 1,
+        });
         queue.enqueue({
           agentId: "ghost",
           spans: many(10, 1),
           receivedAt: "t",
+          bytes: 1,
         });
         expect(flushThrows(queue)).toBe(true);
         expect(flushThrows(queue)).toBe(true);
@@ -620,7 +649,12 @@ describe("telemetry queue (component 23)", () => {
         expect(queue.flush()).toBe(0);
         expect(queue.depth()).toBe(0);
         expect(getTelemetryCounter(db, DROPPED_SPANS_COUNTER)).toBe(3);
-        queue.enqueue({ agentId, spans: many(20, 4), receivedAt: "t" });
+        queue.enqueue({
+          agentId,
+          spans: many(20, 4),
+          receivedAt: "t",
+          bytes: 1,
+        });
         const committed = queue.flush();
         expect(committed).toBe(4);
         expect(rowCount(db)).toBe(committed);
@@ -653,13 +687,15 @@ describe("telemetry queue (component 23)", () => {
           agentId,
           spans: many(0, 2, new Map([[0, claim]])),
           receivedAt: "t",
+          bytes: 1,
         });
         queue.enqueue({
           agentId: "ghost",
           spans: many(10, 1),
           receivedAt: "t",
+          bytes: 1,
         });
-        queue.enqueue({ agentId, spans: filler, receivedAt: "t" });
+        queue.enqueue({ agentId, spans: filler, receivedAt: "t", bytes: 1 });
         const enqueued = 2 + 1 + 500;
         expect(flushThrows(queue)).toBe(true);
         expect(flushThrows(queue)).toBe(true);
@@ -690,14 +726,26 @@ describe("telemetry queue (component 23)", () => {
           1,
           new Map([[0, failing("SQLITE_BUSY", () => true)]]),
         );
-        expect(queue.enqueue({ agentId, spans, receivedAt: "t" })).toBe(true);
         expect(
-          queue.enqueue({ agentId, spans: many(5, 1), receivedAt: "t" }),
+          queue.enqueue({ agentId, spans, receivedAt: "t", bytes: 1 }),
+        ).toBe(true);
+        expect(
+          queue.enqueue({
+            agentId,
+            spans: many(5, 1),
+            receivedAt: "t",
+            bytes: 1,
+          }),
         ).toBe(true);
         for (let i = 0; i < 3; i++) {
           expect(flushThrows(queue)).toBe(true);
           expect(
-            queue.enqueue({ agentId, spans: many(9, 1), receivedAt: "t" }),
+            queue.enqueue({
+              agentId,
+              spans: many(9, 1),
+              receivedAt: "t",
+              bytes: 1,
+            }),
           ).toBe(false);
           expect(queue.depth()).toBe(2);
         }
@@ -723,13 +771,269 @@ describe("telemetry queue (component 23)", () => {
           },
         });
         const spans = many(0, 3, new Map([[1, attrs]]));
-        queue.enqueue({ agentId, spans, receivedAt: "t" });
+        queue.enqueue({ agentId, spans, receivedAt: "t", bytes: 1 });
         expect(queue.flush()).toBe(3);
         expect(nested).toBe(0);
         expect(ids(db)).toEqual(spans.map((s) => s.spanId));
       } finally {
         closeDatabase(db);
       }
+    });
+
+    describe("queue byte budget (#156 part B)", () => {
+      const batch = (
+        agentId: string,
+        from: number,
+        n: number,
+        bytes: number,
+      ) => ({
+        agentId,
+        spans: many(from, n),
+        receivedAt: "t",
+        bytes,
+      });
+
+      it("unit: refuses past the byte budget, accepts exactly at it, and recovers after a drain", () => {
+        const db = openDatabase(tempDbPath("polymer-queue-"));
+        try {
+          const agentId = seedAgent(db);
+          const queue = new TelemetryQueue(db, {
+            maxBatches: 10,
+            maxBytes: 100,
+            flushMs: 60000,
+          });
+          expect(queue.enqueue(batch(agentId, 0, 1, 60))).toBe(true);
+          expect(queue.enqueue(batch(agentId, 1, 1, 41))).toBe(false);
+          expect(queue.enqueue(batch(agentId, 1, 1, 40))).toBe(true); // exactly 100
+          expect(queue.queuedBytes()).toBe(100);
+          expect(queue.enqueue(batch(agentId, 2, 1, 1))).toBe(false);
+          expect(queue.flush()).toBe(2);
+          expect(queue.queuedBytes()).toBe(0);
+          expect(queue.enqueue(batch(agentId, 3, 1, 100))).toBe(true);
+        } finally {
+          closeDatabase(db);
+        }
+      });
+
+      it("unit: bytes are zero after a drain and after a #155 drop, and unchanged by a transient failure", () => {
+        const db = openDatabase(tempDbPath("polymer-queue-"));
+        quiet();
+        try {
+          const agentId = seedAgent(db);
+          const queue = new TelemetryQueue(db, {
+            maxBatches: 10,
+            maxBytes: 1000,
+            flushMs: 60000,
+          });
+          // Transient failure: nothing leaves, nothing is freed.
+          let fail = true;
+          queue.enqueue({
+            agentId,
+            spans: many(
+              0,
+              2,
+              new Map([[1, failing("SQLITE_BUSY", () => fail)]]),
+            ),
+            receivedAt: "t",
+            bytes: 70,
+          });
+          expect(flushThrows(queue)).toBe(true);
+          expect(queue.queuedBytes()).toBe(70);
+          fail = false;
+          expect(queue.flush()).toBe(2);
+          expect(queue.queuedBytes()).toBe(0);
+          // Deterministic failure (FK on a ghost agent): dropped on the 3rd try.
+          queue.enqueue(batch("ghost", 10, 2, 55));
+          expect(flushThrows(queue)).toBe(true);
+          expect(flushThrows(queue)).toBe(true);
+          expect(queue.queuedBytes()).toBe(55);
+          expect(queue.flush()).toBe(0);
+          expect(queue.depth()).toBe(0);
+          expect(queue.queuedBytes()).toBe(0);
+          // Not wedged: the full budget is available again.
+          expect(queue.enqueue(batch(agentId, 20, 1, 1000))).toBe(true);
+        } finally {
+          vi.restoreAllMocks();
+          closeDatabase(db);
+        }
+      });
+
+      it("unit: a 700-span batch drained in two chunks never reports more queued bytes after a chunk than before, and ends at zero", () => {
+        const db = openDatabase(tempDbPath("polymer-queue-"));
+        try {
+          const agentId = seedAgent(db);
+          const queue = new TelemetryQueue(db, {
+            maxBatches: 10,
+            maxBytes: 5000,
+            flushMs: 60000,
+          });
+          let fail = false;
+          queue.enqueue({
+            agentId,
+            // Chunk 2 (spans 500-699) fails transiently once, so the state
+            // between the two chunks is observable.
+            spans: many(
+              0,
+              700,
+              new Map([[600, failing("SQLITE_BUSY", () => fail)]]),
+            ),
+            receivedAt: "t",
+            bytes: 1001,
+          });
+          const before = queue.queuedBytes();
+          fail = true;
+          expect(flushThrows(queue)).toBe(true); // chunk 1 committed, chunk 2 kept
+          expect(rowCount(db)).toBe(500);
+          const between = queue.queuedBytes();
+          expect(between).toBeLessThanOrEqual(before);
+          expect(between).toBeGreaterThan(0);
+          expect(between).toBe(Math.ceil((1001 * 200) / 700));
+          // Retry with no new failure: the partial head must not grow.
+          fail = false;
+          expect(queue.flush()).toBe(200);
+          expect(queue.queuedBytes()).toBeLessThanOrEqual(between);
+          expect(queue.queuedBytes()).toBe(0);
+          expect(rowCount(db)).toBe(700);
+        } finally {
+          closeDatabase(db);
+        }
+      });
+
+      it("unit: conservation, queuedBytes always equals the sum of the batches still queued", () => {
+        const db = openDatabase(tempDbPath("polymer-queue-"));
+        try {
+          const agentId = seedAgent(db);
+          const queue = new TelemetryQueue(db, {
+            maxBatches: 50,
+            maxBytes: 100_000,
+            flushMs: 60000,
+          });
+          let accepted = 0;
+          for (let i = 0; i < 20; i += 1) {
+            const bytes = 100 + i * 37;
+            if (
+              queue.enqueue(batch(agentId, i * 40, 40 + (i % 3) * 300, bytes))
+            ) {
+              accepted += bytes;
+            }
+            expect(queue.queuedBytes()).toBe(accepted);
+          }
+          expect(queue.flush()).toBeGreaterThan(0);
+          expect(queue.queuedBytes()).toBe(0);
+          expect(queue.depth()).toBe(0);
+        } finally {
+          closeDatabase(db);
+        }
+      });
+
+      it("unit: a drop count whose counter write failed is recorded by a later flush even when the queue is empty", () => {
+        const db = openDatabase(tempDbPath("polymer-queue-"));
+        quiet();
+        try {
+          const queue = new TelemetryQueue(db, {
+            maxBatches: 10,
+            flushMs: 60000,
+          });
+          queue.enqueue(batch("ghost", 0, 2, 10));
+          // Break the counter table so the drop count cannot be persisted.
+          db.exec(
+            "CREATE TRIGGER block_counters BEFORE INSERT ON telemetry_counters BEGIN SELECT RAISE(ABORT, 'blocked'); END",
+          );
+          expect(flushThrows(queue)).toBe(true);
+          expect(flushThrows(queue)).toBe(true);
+          expect(queue.flush()).toBe(0); // dropped; counter write fails
+          expect(queue.depth()).toBe(0);
+          db.exec("DROP TRIGGER block_counters");
+          expect(getTelemetryCounter(db, DROPPED_SPANS_COUNTER)).toBe(0);
+          expect(queue.flush()).toBe(0); // empty queue, but the count is recorded
+          expect(getTelemetryCounter(db, DROPPED_SPANS_COUNTER)).toBe(2);
+        } finally {
+          vi.restoreAllMocks();
+          closeDatabase(db);
+        }
+      });
+
+      it("unit: non-finite and non-positive maxBytes are refused at construction", () => {
+        for (const maxBytes of [0, -1, Number.NaN, Infinity, -Infinity]) {
+          expect(
+            () =>
+              new TelemetryQueue(null, { maxBatches: 1, maxBytes, flushMs: 1 }),
+          ).toThrow(RangeError);
+        }
+      });
+
+      it("HTTP: a full byte budget answers 429 + retry_after; the option is clamped to maxRequestBytes; nonsense is refused", async () => {
+        const body = JSON.stringify({
+          resourceSpans: [
+            {
+              scopeSpans: [
+                {
+                  spans: [
+                    { traceId: T, spanId: "bbbbbbbbbbbbbbbb", name: "s" },
+                  ],
+                },
+              ],
+            },
+          ],
+        });
+        const L = Buffer.byteLength(body);
+        const app = await listen("127.0.0.1", 0, {
+          databasePath: tempDbPath("polymer-otel-"),
+          telemetryMaxRequestBytes: L + 10,
+          telemetryQueueMaxBytes: 2 * L + 20,
+          telemetryBatchFlushMs: 600_000,
+        });
+        try {
+          const [agent] = await registerAgentsOn(app, ["otel-agent"]);
+          const post = () =>
+            fetch(`${app.url}/otel/v1/traces`, {
+              method: "POST",
+              headers: {
+                authorization: `Bearer ${agent.token}`,
+                "content-type": "application/json",
+              },
+              body,
+            });
+          expect((await post()).status).toBe(200);
+          expect((await post()).status).toBe(200);
+          const full = await post();
+          expect(full.status).toBe(429);
+          expect(await full.json()).toEqual({
+            error: "rate_limit_exceeded",
+            retry_after: 60,
+          });
+        } finally {
+          await app.close();
+        }
+        // Below maxRequestBytes: clamped up, so one max-size request fits.
+        const clamped = await listen("127.0.0.1", 0, {
+          databasePath: tempDbPath("polymer-otel-"),
+          telemetryQueueMaxBytes: 10,
+          telemetryBatchFlushMs: 600_000,
+        });
+        try {
+          const [agent] = await registerAgentsOn(clamped, ["otel-agent"]);
+          const res = await fetch(`${clamped.url}/otel/v1/traces`, {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${agent.token}`,
+              "content-type": "application/json",
+            },
+            body,
+          });
+          expect(res.status).toBe(200);
+        } finally {
+          await clamped.close();
+        }
+        for (const bad of [0, -5, Number.NaN, Infinity]) {
+          await expect(
+            listen("127.0.0.1", 0, {
+              databasePath: tempDbPath("polymer-otel-"),
+              telemetryQueueMaxBytes: bad,
+            }),
+          ).rejects.toThrow(RangeError);
+        }
+      });
     });
   });
 });

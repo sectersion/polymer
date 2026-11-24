@@ -17,7 +17,10 @@ import { randomUUID } from "node:crypto";
  * A full queue rejects with `false` so the HTTP layer answers 429.
  *
  * Bound: at most `maxBatches` batches, each at most `batchMaxSpans`
- * spans (enforced at validation). Memory cannot grow without bound.
+ * spans (enforced at validation), and at most `maxBytes` of request
+ * body bytes across all queued batches. The byte count is WIRE bytes
+ * (decoded heap is several times larger), so the real worst case is a
+ * multiple of `maxBytes`. Memory cannot grow without bound.
  * The writer and the queue share the event loop with coordination
  * traffic; flushes are single transactions and the timer never
  * overlaps itself.
@@ -27,7 +30,12 @@ export interface QueuedBatch {
   agentId: string;
   spans: ValidatedSpan[];
   receivedAt: string;
+  /** Request body length this batch was decoded from (wire bytes). */
+  bytes: number;
 }
+
+/** Default queue byte budget: 64 MiB of wire bytes. */
+export const DEFAULT_QUEUE_MAX_BYTES = 64 * 1024 * 1024;
 
 /**
  * Maximum rows per writer transaction (skill bound). A full queue
@@ -54,11 +62,14 @@ type Row = { agentId: string; span: ValidatedSpan; receivedAt: string };
 
 export interface TelemetryQueueOptions {
   maxBatches: number;
+  /** Wire-byte budget across queued batches; finite and > 0. */
+  maxBytes?: number;
   flushMs: number;
 }
 
 export class TelemetryQueue {
   private readonly pending: QueuedBatch[] = [];
+  private readonly maxBytes: number;
   private timer: ReturnType<typeof setInterval> | undefined;
   private flushing = false;
   private failedAttempts = 0;
@@ -68,7 +79,14 @@ export class TelemetryQueue {
   constructor(
     private readonly db: PolymerDatabase | null,
     private readonly options: TelemetryQueueOptions,
-  ) {}
+  ) {
+    const maxBytes = options.maxBytes ?? DEFAULT_QUEUE_MAX_BYTES;
+    // Nonsense is refused, never read as "unlimited".
+    if (!Number.isFinite(maxBytes) || maxBytes <= 0) {
+      throw new RangeError("telemetry queue maxBytes must be finite and > 0");
+    }
+    this.maxBytes = maxBytes;
+  }
 
   /** Start the periodic flush. Idempotent. */
   start(): void {
@@ -100,13 +118,26 @@ export class TelemetryQueue {
   }
 
   /**
+   * Wire bytes currently queued. Derived from `pending` (at most
+   * maxBatches entries) rather than tracked in a counter, so it cannot
+   * drift or leak across drains, drops, or partial batches.
+   */
+  queuedBytes(): number {
+    let total = 0;
+    for (const batch of this.pending) total += batch.bytes;
+    return total;
+  }
+
+  /**
    * Accept one validated batch. Returns false when the queue is full
-   * (caller answers 429 + retry_after) or when there is no database
-   * to drain into; true means validated and queued — never committed.
+   * by batch count or byte budget (caller answers 429 + retry_after)
+   * or when there is no database to drain into; true means validated
+   * and queued — never committed.
    */
   enqueue(batch: QueuedBatch): boolean {
     if (this.db === null) return false;
     if (this.pending.length >= this.options.maxBatches) return false;
+    if (this.queuedBytes() + batch.bytes > this.maxBytes) return false;
     this.pending.push(batch);
     return true;
   }
@@ -135,7 +166,11 @@ export class TelemetryQueue {
    * that throws and takes the deterministic-failure path above.)
    */
   flush(): number {
-    if (this.db === null || this.flushing || this.pending.length === 0) {
+    if (this.db === null || this.flushing) return 0;
+    if (this.pending.length === 0) {
+      // A drop count whose counter write failed must not be stranded
+      // by an empty queue.
+      this.recordDrops();
       return 0;
     }
     this.flushing = true;
@@ -275,7 +310,15 @@ export class TelemetryQueue {
     this.pending.splice(0, wholeBatches);
     if (usedInHead > 0) {
       const head = this.pending[0]!;
-      this.pending[0] = { ...head, spans: head.spans.slice(usedInHead) };
+      const remaining = head.spans.length - usedInHead;
+      // Prorate so the budget frees as the head drains. ceil may leave
+      // up to a byte of slack per boundary; harmless because the total
+      // is always recomputed from `pending`.
+      this.pending[0] = {
+        ...head,
+        spans: head.spans.slice(usedInHead),
+        bytes: Math.ceil((head.bytes * remaining) / head.spans.length),
+      };
     }
   }
 

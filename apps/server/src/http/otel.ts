@@ -95,6 +95,7 @@ export async function handleOtlpRequest(
       agentId: session.principal.agentId,
       spans: parsed.spans,
       receivedAt: new Date().toISOString(),
+      bytes: body.bytes.length,
     });
     if (!queued) {
       sendJson(res, 429, { error: "rate_limit_exceeded", retry_after: 60 });
