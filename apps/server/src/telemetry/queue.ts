@@ -37,6 +37,21 @@ export interface QueuedBatch {
  */
 const MAX_ROWS_PER_TXN = 500;
 
+/** Spans dropped after repeated deterministic flush failures. */
+export const DROPPED_SPANS_COUNTER = "telemetry.flush_dropped_spans";
+const MAX_DETERMINISTIC_ATTEMPTS = 3;
+
+/** Transient SQLite failures are retried forever, never dropped. */
+function isTransientSqliteError(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code;
+  return (
+    typeof code === "string" &&
+    /^SQLITE_(BUSY|LOCKED|FULL|IOERR|CANTOPEN)/.test(code)
+  );
+}
+
+type Row = { agentId: string; span: ValidatedSpan; receivedAt: string };
+
 export interface TelemetryQueueOptions {
   maxBatches: number;
   flushMs: number;
@@ -46,6 +61,9 @@ export class TelemetryQueue {
   private readonly pending: QueuedBatch[] = [];
   private timer: ReturnType<typeof setInterval> | undefined;
   private flushing = false;
+  private failedAttempts = 0;
+  private unrecordedDrops = 0;
+  private counterBump: { run(...args: unknown[]): unknown } | undefined;
 
   constructor(
     private readonly db: PolymerDatabase | null,
@@ -60,8 +78,9 @@ export class TelemetryQueue {
         this.flush();
       } catch (err) {
         // A failed flush must never take down the server (or wedge
-        // the timer): batches stay queued for the next tick, and the
-        // failure is visible in logs, never in client responses.
+        // the timer): the failing chunk and everything after it stay
+        // queued for the next tick, and the failure is visible in
+        // logs, never in client responses.
         console.error("telemetry flush failed:", err);
       }
     }, this.options.flushMs);
@@ -98,12 +117,22 @@ export class TelemetryQueue {
    * calls are skipped (the timer never overlaps itself; a manual
    * flush during a timer flush is a no-op returning 0).
    *
+   * A chunk leaves `pending` only after its transaction commits, so
+   * a throw leaves the failing chunk and everything after it queued
+   * (flush rethrows; the timer logs and retries next tick). Failures
+   * are classified: transient SQLite errors (busy, locked, full, I/O,
+   * cantopen) are retried forever, never dropped; the full queue's
+   * 429 is the backpressure. Any other error is deterministic: after
+   * MAX_DETERMINISTIC_ATTEMPTS consecutive failures that chunk is
+   * dropped and counted in DROPPED_SPANS_COUNTER, so one poison span
+   * cannot wedge intake.
+   *
    * SQLITE_BUSY needs no app-level retry here: the database sets
    * `PRAGMA busy_timeout = 5000`, so SQLite backs off and retries
    * internally. Duplicate span_ids collapse via INSERT OR IGNORE: an
-   * OTLP retry of an already-flushed batch is idempotent. (The same
-   * clause silently drops spans whose agent row vanished mid-queue —
-   * consistent with at-most-once, never an error.)
+   * OTLP retry of an already-flushed batch is idempotent. (OR IGNORE
+   * does NOT cover a foreign-key failure, e.g. a vanished agent row:
+   * that throws and takes the deterministic-failure path above.)
    */
   flush(): number {
     if (this.db === null || this.flushing || this.pending.length === 0) {
@@ -111,7 +140,6 @@ export class TelemetryQueue {
     }
     this.flushing = true;
     try {
-      const batches = this.pending.splice(0, this.pending.length);
       const insert = this.db.prepare(
         `INSERT OR IGNORE INTO otel_spans
            (span_id, trace_id, agent_id, name, parent_span_id,
@@ -120,12 +148,6 @@ export class TelemetryQueue {
             ingested_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
-      let written = 0;
-      let chunk: Array<{
-        agentId: string;
-        span: ValidatedSpan;
-        receivedAt: string;
-      }> = [];
       // Component 26: usage rows derive in the SAME transaction as the
       // spans — never a separate ingestion path. Only spans actually
       // inserted (changes === 1) derive usage, so an OTLP retry of an
@@ -142,8 +164,12 @@ export class TelemetryQueue {
         `INSERT INTO telemetry_counters (name, value) VALUES (?, ?)
          ON CONFLICT(name) DO UPDATE SET value = value + excluded.value`,
       );
-      let rejectedClaims = 0;
-      const writeChunk = this.db.transaction(() => {
+      this.counterBump = counterBump;
+      // Per-chunk accounting lives inside the closure: a rolled-back
+      // transaction must not leave partial counts behind.
+      const writeChunk = this.db.transaction((chunk: Row[]) => {
+        let chunkWritten = 0;
+        let rejectedClaims = 0;
         for (const row of chunk) {
           const result = insert.run(
             row.span.spanId,
@@ -162,7 +188,7 @@ export class TelemetryQueue {
             row.receivedAt,
           );
           if (Number(result.changes) !== 1) continue;
-          written += 1;
+          chunkWritten += 1;
           const usage = deriveSpanUsage(row.span);
           if (!usage.hasUsage) continue;
           const task = resolveUsageTask(this.db!, row.agentId, row.span);
@@ -186,28 +212,88 @@ export class TelemetryQueue {
         }
         if (rejectedClaims > 0) {
           counterBump.run(TASK_ID_REJECTED_COUNTER, rejectedClaims);
-          rejectedClaims = 0;
         }
+        return chunkWritten;
       });
-      for (const batch of batches) {
-        for (const span of batch.spans) {
-          chunk.push({
-            agentId: batch.agentId,
-            span,
-            receivedAt: batch.receivedAt,
-          });
-          if (chunk.length >= MAX_ROWS_PER_TXN) {
-            writeChunk();
-            chunk = [];
+      let written = 0;
+      while (this.pending.length > 0) {
+        // Build the next chunk from the queue front WITHOUT removing it.
+        const chunk: Row[] = [];
+        let wholeBatches = 0;
+        let usedInHead = 0;
+        for (const batch of this.pending) {
+          const take = Math.min(
+            batch.spans.length,
+            MAX_ROWS_PER_TXN - chunk.length,
+          );
+          for (let i = 0; i < take; i++) {
+            chunk.push({
+              agentId: batch.agentId,
+              span: batch.spans[i]!,
+              receivedAt: batch.receivedAt,
+            });
           }
+          if (take < batch.spans.length) {
+            usedInHead = take;
+            break;
+          }
+          wholeBatches += 1;
+          if (chunk.length >= MAX_ROWS_PER_TXN) break;
         }
+        try {
+          written += writeChunk(chunk);
+        } catch (err) {
+          if (isTransientSqliteError(err)) {
+            this.failedAttempts = 0; // only consecutive deterministic failures count
+            throw err;
+          }
+          this.failedAttempts += 1;
+          if (this.failedAttempts < MAX_DETERMINISTIC_ATTEMPTS) throw err;
+          // Counts + code only: never span contents.
+          console.error("telemetry chunk dropped:", {
+            spans: chunk.length,
+            code: (err as { code?: unknown }).code ?? "unknown",
+          });
+          this.failedAttempts = 0;
+          this.unrecordedDrops += chunk.length;
+          this.dequeue(wholeBatches, usedInHead);
+          this.recordDrops();
+          continue;
+        }
+        this.failedAttempts = 0;
+        this.dequeue(wholeBatches, usedInHead);
       }
-      if (chunk.length > 0) {
-        writeChunk();
-      }
+      this.recordDrops();
       return written;
     } finally {
       this.flushing = false;
+    }
+  }
+
+  /** Remove what a committed (or dropped) chunk consumed from the front. */
+  private dequeue(wholeBatches: number, usedInHead: number): void {
+    this.pending.splice(0, wholeBatches);
+    if (usedInHead > 0) {
+      const head = this.pending[0]!;
+      this.pending[0] = { ...head, spans: head.spans.slice(usedInHead) };
+    }
+  }
+
+  /**
+   * Persist the drop count. Drops only happen while the database is
+   * healthy, so this normally succeeds at once; if it does not, the
+   * count stays in memory and is retried on the next flush.
+   */
+  private recordDrops(): void {
+    if (this.unrecordedDrops === 0 || this.counterBump === undefined) return;
+    try {
+      this.counterBump.run(DROPPED_SPANS_COUNTER, this.unrecordedDrops);
+      this.unrecordedDrops = 0;
+    } catch (err) {
+      console.error("telemetry drop counter write failed:", {
+        spans: this.unrecordedDrops,
+        code: (err as { code?: unknown }).code ?? "unknown",
+      });
     }
   }
 }
