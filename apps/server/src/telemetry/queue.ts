@@ -243,7 +243,10 @@ export class TelemetryQueue {
         try {
           written += writeChunk(chunk);
         } catch (err) {
-          if (isTransientSqliteError(err)) throw err;
+          if (isTransientSqliteError(err)) {
+            this.failedAttempts = 0; // only consecutive deterministic failures count
+            throw err;
+          }
           this.failedAttempts += 1;
           if (this.failedAttempts < MAX_DETERMINISTIC_ATTEMPTS) throw err;
           // Counts + code only: never span contents.

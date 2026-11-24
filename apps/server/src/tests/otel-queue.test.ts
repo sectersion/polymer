@@ -646,6 +646,9 @@ describe("telemetry queue (component 23)", () => {
           { key: "polymer.task_id", value: { stringValue: "not-mine" } },
           { key: "gen_ai.usage.input_tokens", value: { intValue: "5" } },
         ];
+        // Chunk 1 = A(2, one rejected claim) + ghost(1, FK poison) +
+        // 497 valid; chunk 2 = the last 3 of F, one a rejected claim.
+        const filler = many(100, 500, new Map([[499, claim]]));
         queue.enqueue({
           agentId,
           spans: many(0, 2, new Map([[0, claim]])),
@@ -656,18 +659,21 @@ describe("telemetry queue (component 23)", () => {
           spans: many(10, 1),
           receivedAt: "t",
         });
-        flushThrows(queue);
-        flushThrows(queue);
-        expect(queue.flush()).toBe(0);
-        expect(getTelemetryCounter(db, TASK_ID_REJECTED_COUNTER)).toBe(0);
-        queue.enqueue({
-          agentId,
-          spans: many(100, 2, new Map([[0, claim]])),
-          receivedAt: "t",
-        });
-        expect(queue.flush()).toBe(2);
-        expect(rowCount(db)).toBe(2);
+        queue.enqueue({ agentId, spans: filler, receivedAt: "t" });
+        const enqueued = 2 + 1 + 500;
+        expect(flushThrows(queue)).toBe(true);
+        expect(flushThrows(queue)).toBe(true);
+        expect(rowCount(db)).toBe(0);
+        // Third flush: drops chunk 1 and commits chunk 2 in the SAME call.
+        const committed = queue.flush();
+        expect(committed).toBe(3);
+        expect(rowCount(db)).toBe(committed);
         expect(getTelemetryCounter(db, TASK_ID_REJECTED_COUNTER)).toBe(1);
+        expect(getTelemetryCounter(db, DROPPED_SPANS_COUNTER)).toBe(500);
+        expect(committed + getTelemetryCounter(db, DROPPED_SPANS_COUNTER)).toBe(
+          enqueued,
+        );
+        expect(queue.depth()).toBe(0);
       } finally {
         vi.restoreAllMocks();
         closeDatabase(db);
