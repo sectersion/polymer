@@ -1,4 +1,5 @@
 import type { PolymerDatabase } from "../database/db.js";
+import { usageEventId, type UsageEvent } from "./logs.js";
 import type { ValidatedSpan } from "./otlp.js";
 import {
   TASK_ID_REJECTED_COUNTER,
@@ -29,6 +30,8 @@ import { randomUUID } from "node:crypto";
 export interface QueuedBatch {
   agentId: string;
   spans: ValidatedSpan[];
+  /** Usage events from an OTLP logs batch (#159); written after the spans. */
+  usage?: UsageEvent[];
   receivedAt: string;
   /** Request body length this batch was decoded from (wire bytes). */
   bytes: number;
@@ -58,7 +61,13 @@ function isTransientSqliteError(err: unknown): boolean {
   );
 }
 
-type Row = { agentId: string; span: ValidatedSpan; receivedAt: string };
+type Row =
+  | { agentId: string; span: ValidatedSpan; receivedAt: string }
+  | { agentId: string; event: UsageEvent; receivedAt: string };
+
+/** Rows a batch still holds: its spans, then its usage events. */
+const batchSize = (b: QueuedBatch): number =>
+  b.spans.length + (b.usage?.length ?? 0);
 
 export interface TelemetryQueueOptions {
   maxBatches: number;
@@ -195,6 +204,15 @@ export class TelemetryQueue {
             reported_cost_micro_usd, cost_source, recorded_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
+      // Log-derived usage only: a deterministic usage_id makes an
+      // exporter retry idempotent (OR IGNORE). Never used for spans.
+      const logUsageInsert = this.db.prepare(
+        `INSERT OR IGNORE INTO usage_records
+           (usage_id, agent_id, task_id, trace_id, provider, model,
+            input_tokens, output_tokens, other_token_categories,
+            reported_cost_micro_usd, cost_source, recorded_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
       const counterBump = this.db.prepare(
         `INSERT INTO telemetry_counters (name, value) VALUES (?, ?)
          ON CONFLICT(name) DO UPDATE SET value = value + excluded.value`,
@@ -206,6 +224,32 @@ export class TelemetryQueue {
         let chunkWritten = 0;
         let rejectedClaims = 0;
         for (const row of chunk) {
+          if ("event" in row) {
+            const e = row.event;
+            const other: Record<string, number> = {};
+            if (typeof e.cacheReadTokens === "number") {
+              other["cache_read_tokens"] = e.cacheReadTokens;
+            }
+            if (typeof e.cacheCreationTokens === "number") {
+              other["cache_creation_tokens"] = e.cacheCreationTokens;
+            }
+            const r = logUsageInsert.run(
+              usageEventId(row.agentId, e),
+              row.agentId,
+              null,
+              null,
+              "anthropic",
+              e.model,
+              e.inputTokens,
+              e.outputTokens,
+              Object.keys(other).length > 0 ? JSON.stringify(other) : null,
+              e.costMicroUsd,
+              e.costMicroUsd === null ? "unknown" : "reported",
+              row.receivedAt,
+            );
+            chunkWritten += Number(r.changes);
+            continue;
+          }
           const result = insert.run(
             row.span.spanId,
             row.span.traceId,
@@ -258,17 +302,25 @@ export class TelemetryQueue {
         let usedInHead = 0;
         for (const batch of this.pending) {
           const take = Math.min(
-            batch.spans.length,
+            batchSize(batch),
             MAX_ROWS_PER_TXN - chunk.length,
           );
           for (let i = 0; i < take; i++) {
-            chunk.push({
-              agentId: batch.agentId,
-              span: batch.spans[i]!,
-              receivedAt: batch.receivedAt,
-            });
+            chunk.push(
+              i < batch.spans.length
+                ? {
+                    agentId: batch.agentId,
+                    span: batch.spans[i]!,
+                    receivedAt: batch.receivedAt,
+                  }
+                : {
+                    agentId: batch.agentId,
+                    event: batch.usage![i - batch.spans.length]!,
+                    receivedAt: batch.receivedAt,
+                  },
+            );
           }
-          if (take < batch.spans.length) {
+          if (take < batchSize(batch)) {
             usedInHead = take;
             break;
           }
@@ -310,14 +362,16 @@ export class TelemetryQueue {
     this.pending.splice(0, wholeBatches);
     if (usedInHead > 0) {
       const head = this.pending[0]!;
-      const remaining = head.spans.length - usedInHead;
+      const remaining = batchSize(head) - usedInHead;
+      const fromSpans = Math.min(usedInHead, head.spans.length);
       // Prorate so the budget frees as the head drains. ceil may leave
       // up to a byte of slack per boundary; harmless because the total
       // is always recomputed from `pending`.
       this.pending[0] = {
         ...head,
-        spans: head.spans.slice(usedInHead),
-        bytes: Math.ceil((head.bytes * remaining) / head.spans.length),
+        spans: head.spans.slice(fromSpans),
+        usage: head.usage?.slice(usedInHead - fromSpans),
+        bytes: Math.ceil((head.bytes * remaining) / batchSize(head)),
       };
     }
   }

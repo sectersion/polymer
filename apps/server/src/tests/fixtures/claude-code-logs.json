@@ -1,0 +1,69 @@
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": { "stringValue": "fixture-service" }
+          },
+          {
+            "key": "service.version",
+            "value": { "stringValue": "0.0.0-fixture" }
+          }
+        ]
+      },
+      "scopeLogs": [
+        {
+          "scope": {
+            "name": "com.anthropic.claude_code.events",
+            "version": "0.0.0-fixture"
+          },
+          "logRecords": [
+            {
+              "timeUnixNano": "1700000000000000000",
+              "body": { "stringValue": "claude_code.hook_registered" },
+              "attributes": [
+                {
+                  "key": "event.name",
+                  "value": { "stringValue": "hook_registered" }
+                },
+                {
+                  "key": "session.id",
+                  "value": { "stringValue": "fake-session-0001" }
+                },
+                { "key": "event.sequence", "value": { "intValue": 1 } }
+              ]
+            },
+            {
+              "timeUnixNano": "1700000001000000000",
+              "body": { "stringValue": "claude_code.api_request" },
+              "attributes": [
+                {
+                  "key": "event.name",
+                  "value": { "stringValue": "api_request" }
+                },
+                {
+                  "key": "event.timestamp",
+                  "value": { "stringValue": "2023-11-14T22:13:21.000Z" }
+                },
+                { "key": "event.sequence", "value": { "intValue": 26 } },
+                {
+                  "key": "session.id",
+                  "value": { "stringValue": "fake-session-0001" }
+                },
+                { "key": "model", "value": { "stringValue": "fake-model" } },
+                { "key": "input_tokens", "value": { "intValue": 1000 } },
+                { "key": "output_tokens", "value": { "intValue": 20 } },
+                { "key": "cache_read_tokens", "value": { "intValue": 300 } },
+                { "key": "cache_creation_tokens", "value": { "intValue": 40 } },
+                { "key": "cost_usd", "value": { "doubleValue": 0.0123456 } },
+                { "key": "cost_usd_micros", "value": { "intValue": 12346 } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

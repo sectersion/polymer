@@ -265,6 +265,57 @@ async function main() {
       await provider.shutdown();
       pass("OTLP span exported through the real SDK");
 
+      step = "otel-logs-ingestion";
+      // Claude Code's own export (#159): api_request events become usage
+      // rows for the credential's agent; other records are dropped.
+      const logsRes = await fetch(`${base}/otel/v1/logs`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${rcA.session_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          resourceLogs: [
+            {
+              scopeLogs: [
+                {
+                  logRecords: [
+                    {
+                      attributes: [
+                        {
+                          key: "event.name",
+                          value: { stringValue: "user_prompt" },
+                        },
+                      ],
+                    },
+                    {
+                      attributes: [
+                        {
+                          key: "event.name",
+                          value: { stringValue: "api_request" },
+                        },
+                        { key: "input_tokens", value: { intValue: 10 } },
+                        { key: "output_tokens", value: { intValue: 5 } },
+                        { key: "cost_usd_micros", value: { intValue: 700 } },
+                        { key: "session.id", value: { stringValue: "e2e" } },
+                        { key: "event.sequence", value: { intValue: 1 } },
+                        {
+                          key: "event.timestamp",
+                          value: { stringValue: "2023-11-14T22:13:20.000Z" },
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      });
+      expectEqual(logsRes.status, 200, "logs batch accepted");
+      pass("OTLP logs api_request accepted");
+      await sleep(1500); // let the batch writer flush
+
       step = "agent-b-takes-over";
       await mcpCall(clientB, "send_heartbeat", {});
       const pings = await mcpCall(clientB, "get_unread_pings", {});
@@ -299,13 +350,13 @@ async function main() {
       const seen = tasks.tasks.find((t) => t.task_id === taskId);
       expectEqual(seen?.status, "done", "REST shows the completed task");
       const summary = await (await rest("/api/telemetry/summary")).json();
-      if (summary.total_tokens_used !== 150) {
-        fail(`expected 150 tokens, got ${JSON.stringify(summary)}`);
+      if (summary.total_tokens_used !== 165) {
+        fail(`expected 165 tokens, got ${JSON.stringify(summary)}`);
       }
       expectEqual(
         summary.total_cost_micro_usd,
-        2500,
-        "REST shows reported cost",
+        3200,
+        "REST shows reported cost (span 2500 + log 700)",
       );
       const agents = await (await rest("/api/telemetry/agents")).json();
       expectEqual(agents.agents.length, 2, "both agents in telemetry");
@@ -322,7 +373,7 @@ async function main() {
       const costs = await (
         await rest("/api/telemetry/costs?granularity=daily")
       ).json();
-      if (!costs.time_series.some((b) => b.cost_micro_usd === 2500)) {
+      if (!costs.time_series.some((b) => b.cost_micro_usd === 3200)) {
         fail(`scenario cost missing: ${JSON.stringify(costs)}`);
       }
       pass("web API reflects tasks, telemetry, timeline, and costs");

@@ -57,7 +57,7 @@ export class OtelError extends Error {
   }
 }
 
-const malformed = (): OtelError => new OtelError("invalid_request");
+export const malformed = (): OtelError => new OtelError("invalid_request");
 
 /**
  * Deepest array/kvlist nesting an attribute value may have; the
@@ -68,7 +68,7 @@ const malformed = (): OtelError => new OtelError("invalid_request");
 const MAX_ATTRIBUTE_DEPTH = 32;
 
 /** Minimal protobuf reader: only the wire types OTLP trace uses. */
-class Reader {
+export class Reader {
   pos = 0;
   constructor(private readonly buf: Uint8Array) {}
 
