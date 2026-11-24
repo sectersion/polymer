@@ -467,3 +467,270 @@ describe("OTLP receiver (component 22)", () => {
     expect(upper.spans[0].traceId).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
   });
 });
+
+/** Decode-bound helpers (issue #156, part A). */
+const TRACE = "a".repeat(32);
+const pbBytes = (s: string) => new TextEncoder().encode(s);
+
+function pbSpanBytes(i: number, attrValue?: Uint8Array): Uint8Array {
+  const parts = [
+    field(1, new Uint8Array(16).fill(1)),
+    field(2, new Uint8Array(8).fill((i % 250) + 1)),
+  ];
+  if (attrValue !== undefined) {
+    parts.push(field(9, concat(field(1, pbBytes("k")), field(2, attrValue))));
+  }
+  return concat(...parts);
+}
+
+/** One resourceSpans holding one scopeSpans block per entry. */
+function pbRequest(blocks: Uint8Array[][]): Uint8Array {
+  const scopes = blocks.map((spans) =>
+    field(2, concat(...spans.map((s) => field(2, s)))),
+  );
+  return field(1, concat(...scopes));
+}
+
+/** AnyValue: `levels` nested wrappers around a string leaf. */
+function pbNested(levels: number, kind: "array" | "kvlist"): Uint8Array {
+  let v = field(1, pbBytes("x"));
+  for (let i = 0; i < levels; i += 1) {
+    v =
+      kind === "array"
+        ? field(5, field(1, v))
+        : field(6, field(1, concat(field(1, pbBytes("k")), field(2, v))));
+  }
+  return v;
+}
+
+/** Same as pbNested(array) but linear time, for ~1 MiB payloads. */
+function pbNestedArrayLarge(levels: number): Uint8Array {
+  const prefixes: Uint8Array[] = [];
+  let size = 3; // leaf: tag, len, "x"
+  for (let i = 0; i < levels; i += 1) {
+    const itemPrefix = concat(new Uint8Array([0x0a]), varint(size));
+    const arrLen = itemPrefix.length + size;
+    const arrPrefix = concat(new Uint8Array([0x2a]), varint(arrLen));
+    prefixes.push(concat(arrPrefix, itemPrefix));
+    size = arrPrefix.length + arrLen;
+  }
+  const out = new Uint8Array(size);
+  let pos = 0;
+  for (let i = levels - 1; i >= 0; i -= 1) {
+    out.set(prefixes[i]!, pos);
+    pos += prefixes[i]!.length;
+  }
+  out.set(field(1, pbBytes("x")), pos);
+  return out;
+}
+
+function jsonNested(
+  levels: number,
+  kind: "array" | "kvlist" | "mixed",
+): unknown {
+  let v: unknown = { stringValue: "x" };
+  for (let i = 0; i < levels; i += 1) {
+    const useKv = kind === "kvlist" || (kind === "mixed" && i % 2 === 0);
+    v = useKv
+      ? { kvlistValue: { values: [{ key: "k", value: v }] } }
+      : { arrayValue: { values: [v] } };
+  }
+  return v;
+}
+
+function jsonSpan(i: number, value?: unknown): Record<string, unknown> {
+  return {
+    traceId: TRACE,
+    spanId: `bbbbbbbbbbbb${i.toString(16).padStart(4, "0")}`,
+    ...(value === undefined ? {} : { attributes: [{ key: "k", value }] }),
+  };
+}
+
+function jsonBatch(spans: unknown[]): Uint8Array {
+  return pbBytes(
+    JSON.stringify({ resourceSpans: [{ scopeSpans: [{ spans }] }] }),
+  );
+}
+
+const jsonAttr = (levels: number, kind: "array" | "kvlist" | "mixed") =>
+  jsonBatch([jsonSpan(1, jsonNested(levels, kind))]);
+
+function outcome(fn: () => unknown): string {
+  try {
+    fn();
+    return "ok";
+  } catch (err) {
+    return err instanceof Error && "code" in err
+      ? String((err as { code: unknown }).code)
+      : `unexpected:${String(err)}`;
+  }
+}
+
+const parseProto = (b: Uint8Array, max = 500) =>
+  outcome(() => parseOtlpBatch("application/x-protobuf", b, max));
+const parseJson = (b: Uint8Array, max = 500) =>
+  outcome(() => parseOtlpBatch("application/json", b, max));
+
+describe("OTLP decode bounds (#156 part A)", () => {
+  it("span count: exactly maxSpans passes, maxSpans+1 is payload_too_large (protobuf and JSON)", () => {
+    const pb = (n: number) =>
+      pbRequest([Array.from({ length: n }, (_, i) => pbSpanBytes(i))]);
+    const js = (n: number) =>
+      jsonBatch(Array.from({ length: n }, (_, i) => jsonSpan(i)));
+    expect(parseProto(pb(3), 3)).toBe("ok");
+    expect(parseProto(pb(4), 3)).toBe("payload_too_large");
+    expect(parseJson(js(3), 3)).toBe("ok");
+    expect(parseJson(js(4), 3)).toBe("payload_too_large");
+  });
+
+  it("span count is one total across resource and scope nesting", () => {
+    const blocks = [
+      [pbSpanBytes(1), pbSpanBytes(2)],
+      [pbSpanBytes(3), pbSpanBytes(4)],
+    ];
+    expect(parseProto(pbRequest(blocks), 4)).toBe("ok");
+    expect(parseProto(pbRequest(blocks), 3)).toBe("payload_too_large");
+    const scope = (a: number, b: number) => ({
+      spans: [jsonSpan(a), jsonSpan(b)],
+    });
+    const body = pbBytes(
+      JSON.stringify({
+        resourceSpans: [
+          { scopeSpans: [scope(1, 2), scope(3, 4)] },
+          { scopeSpans: [scope(5, 6)] },
+        ],
+      }),
+    );
+    expect(parseJson(body, 6)).toBe("ok");
+    expect(parseJson(body, 5)).toBe("payload_too_large");
+  });
+
+  it("a malformed span past the limit still answers payload_too_large: it is never decoded", () => {
+    const bad = new Uint8Array([0x0a, 0x00]); // empty trace id: malformed
+    // Same scopeSpans block: caught by the payload-collection check.
+    expect(
+      parseProto(pbRequest([[pbSpanBytes(1), pbSpanBytes(2), bad]]), 2),
+    ).toBe("payload_too_large");
+    // Later scopeSpans block: reaches decodeSpan, which must throw first.
+    expect(
+      parseProto(pbRequest([[pbSpanBytes(1), pbSpanBytes(2)], [bad]]), 2),
+    ).toBe("payload_too_large");
+    // Control: the same malformed span within the limit is a 400.
+    expect(parseProto(pbRequest([[pbSpanBytes(1), bad]]), 2)).toBe(
+      "invalid_request",
+    );
+    const badJson = { traceId: "nope", spanId: "nope" };
+    expect(parseJson(jsonBatch([jsonSpan(1), jsonSpan(2), badJson]), 2)).toBe(
+      "payload_too_large",
+    );
+    expect(parseJson(jsonBatch([jsonSpan(1), badJson]), 2)).toBe(
+      "invalid_request",
+    );
+  });
+
+  it("depth 32 passes and depth 33 is invalid_request, for arrays, kvlists and mixes, in both formats", () => {
+    for (const kind of ["array", "kvlist"] as const) {
+      expect(
+        parseProto(pbRequest([[pbSpanBytes(1, pbNested(32, kind))]])),
+      ).toBe("ok");
+      expect(
+        parseProto(pbRequest([[pbSpanBytes(1, pbNested(33, kind))]])),
+      ).toBe("invalid_request");
+    }
+    for (const kind of ["array", "kvlist", "mixed"] as const) {
+      expect(parseJson(jsonAttr(32, kind))).toBe("ok");
+      expect(parseJson(jsonAttr(33, kind))).toBe("invalid_request");
+    }
+    // Resource attributes are bounded too.
+    const resource = pbBytes(
+      JSON.stringify({
+        resourceSpans: [
+          {
+            resource: {
+              attributes: [{ key: "k", value: jsonNested(33, "array") }],
+            },
+            scopeSpans: [],
+          },
+        ],
+      }),
+    );
+    expect(parseJson(resource)).toBe("invalid_request");
+  });
+
+  it("depth is threaded explicitly: a wide array is fine, a deep chain is not (guards the bare .map(decode) form, which passes the index as depth)", () => {
+    // Bare form: depth := element index, so element 40 would be rejected
+    // while an arbitrarily deep single-element chain (index 0) would pass.
+    const wide = {
+      arrayValue: {
+        values: Array.from({ length: 40 }, () => ({ stringValue: "x" })),
+      },
+    };
+    expect(parseJson(jsonBatch([jsonSpan(1, wide)]))).toBe("ok");
+    expect(parseJson(jsonAttr(33, "array"))).toBe("invalid_request");
+    expect(parseJson(jsonAttr(200, "array"))).toBe("invalid_request");
+  });
+
+  it("a ~1 MiB deeply nested protobuf payload trips the depth cap, not the stack", () => {
+    const value = pbNestedArrayLarge(100_000);
+    expect(value.length).toBeGreaterThan(500_000);
+    const body = pbRequest([[pbSpanBytes(1, value)]]);
+    expect(parseProto(body)).toBe("invalid_request");
+  });
+
+  it("over HTTP: 50,000-deep JSON and ~4000-deep input are 400, never 500, and intake stays healthy", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-otel-"),
+    });
+    try {
+      const [agent] = await registerAgentsOn(app, ["otel-agent"]);
+      const post = (contentType: string, body: Uint8Array) =>
+        postTraces(app.url, { token: agent.token, contentType, body });
+      const deepJson = (levels: number) =>
+        new TextEncoder().encode(
+          `{"resourceSpans":[{"scopeSpans":[{"spans":[{"traceId":"${TRACE}","spanId":"bbbbbbbbbbbbbbbb","attributes":[{"key":"k","value":` +
+            `{"arrayValue":{"values":[`.repeat(levels) +
+            `{"stringValue":"x"}` +
+            `]}}`.repeat(levels) +
+            `}]}]}]}]}`,
+        );
+      for (const levels of [4000, 50_000]) {
+        const res = await post("application/json", deepJson(levels));
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ error: "invalid_request" });
+      }
+      const proto = await post(
+        "application/x-protobuf",
+        pbRequest([[pbSpanBytes(1, pbNested(4000, "array"))]]),
+      );
+      expect(proto.status).toBe(400);
+      const ok = await post("application/json", jsonBatch([jsonSpan(1)]));
+      expect(ok.status).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("over HTTP: protobuf maxSpans+1 answers 413 payload_too_large", async () => {
+    const app = await listen("127.0.0.1", 0, {
+      databasePath: tempDbPath("polymer-otel-"),
+      telemetryBatchMaxSpans: 2,
+    });
+    try {
+      const [agent] = await registerAgentsOn(app, ["otel-agent"]);
+      const post = (n: number) =>
+        postTraces(app.url, {
+          token: agent.token,
+          contentType: "application/x-protobuf",
+          body: pbRequest([
+            Array.from({ length: n }, (_, i) => pbSpanBytes(i)),
+          ]),
+        });
+      expect((await post(2)).status).toBe(200);
+      const over = await post(3);
+      expect(over.status).toBe(413);
+      expect(await over.json()).toEqual({ error: "payload_too_large" });
+    } finally {
+      await app.close();
+    }
+  });
+});
