@@ -677,7 +677,10 @@ export async function createPolymerServer(
       telemetryQueue.flush();
     } catch (err) {
       // Best effort on the way out; the process is exiting anyway.
-      console.error("telemetry final flush failed:", err);
+      console.error("telemetry final flush failed:", {
+        batches_lost: telemetryQueue.depth(),
+        code: (err as { code?: unknown }).code ?? "unknown",
+      });
     }
   };
 

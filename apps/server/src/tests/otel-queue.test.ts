@@ -1,10 +1,14 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import {
+  getTelemetryCounter,
+  TASK_ID_REJECTED_COUNTER,
+} from "../telemetry/usage.js";
 import { listen } from "../http/server.js";
 import { closeDatabase, openDatabase } from "../database/db.js";
-import { TelemetryQueue } from "../telemetry/queue.js";
+import { DROPPED_SPANS_COUNTER, TelemetryQueue } from "../telemetry/queue.js";
 import type { ValidatedSpan } from "../telemetry/otlp.js";
 import {
   registerAgentsOn,
@@ -473,4 +477,253 @@ describe("telemetry queue (component 23)", () => {
       }
     },
   );
+
+  describe("flush failure keeps queued spans (#155)", () => {
+    type Attrs = ValidatedSpan["attributes"];
+    const failing = (code: string | null, shouldFail: () => boolean): Attrs => {
+      const attrs: Attrs = [];
+      Object.defineProperty(attrs, "toJSON", {
+        value: () => {
+          if (shouldFail()) {
+            throw Object.assign(new Error("injected"), code ? { code } : {});
+          }
+          return [];
+        },
+      });
+      return attrs;
+    };
+    const many = (from: number, n: number, attrsAt?: Map<number, Attrs>) =>
+      Array.from({ length: n }, (_, i) => {
+        const s = span(T, `c${(from + i).toString(16).padStart(15, "0")}`);
+        const a = attrsAt?.get(i);
+        return a === undefined ? s : { ...s, attributes: a };
+      });
+    const quiet = () => vi.spyOn(console, "error").mockImplementation(() => {});
+    const flushThrows = (q: TelemetryQueue) => {
+      try {
+        q.flush();
+      } catch {
+        return true;
+      }
+      return false;
+    };
+    const ids = (db: ReturnType<typeof openDatabase>) =>
+      (
+        db.prepare("SELECT span_id FROM otel_spans ORDER BY rowid").all() as {
+          span_id: string;
+        }[]
+      ).map((r) => r.span_id);
+
+    it("unit: failure on chunk 2 of 3 keeps chunks 2-3 queued; chunk 1 commits once", () => {
+      const db = openDatabase(tempDbPath("polymer-queue-"));
+      try {
+        const agentId = seedAgent(db);
+        const queue = new TelemetryQueue(db, {
+          maxBatches: 10,
+          flushMs: 60000,
+        });
+        let fail = true;
+        const batches = [
+          many(0, 500),
+          many(500, 500, new Map([[7, failing("SQLITE_BUSY", () => fail)]])),
+          many(1000, 500),
+        ];
+        for (const spans of batches) {
+          queue.enqueue({ agentId, spans, receivedAt: "t" });
+        }
+        expect(flushThrows(queue)).toBe(true);
+        expect(rowCount(db)).toBe(500);
+        expect(queue.depth()).toBe(2);
+        fail = false;
+        expect(queue.flush()).toBe(1000);
+        expect(queue.depth()).toBe(0);
+        expect(ids(db)).toEqual(batches.flat().map((s) => s.spanId));
+      } finally {
+        closeDatabase(db);
+      }
+    });
+
+    it("unit: a partially consumed head batch keeps exactly its unwritten spans", () => {
+      const db = openDatabase(tempDbPath("polymer-queue-"));
+      try {
+        const agentId = seedAgent(db);
+        const queue = new TelemetryQueue(db, {
+          maxBatches: 10,
+          flushMs: 60000,
+        });
+        let fail = true;
+        const spans = many(
+          0,
+          800,
+          new Map([[600, failing("SQLITE_FULL", () => fail)]]),
+        );
+        queue.enqueue({ agentId, spans, receivedAt: "t" });
+        expect(flushThrows(queue)).toBe(true);
+        expect(rowCount(db)).toBe(500);
+        expect(queue.depth()).toBe(1);
+        fail = false;
+        expect(queue.flush()).toBe(300);
+        expect(ids(db)).toEqual(spans.map((s) => s.spanId));
+      } finally {
+        closeDatabase(db);
+      }
+    });
+
+    it("unit: SQLITE_BUSY over 10 failing flushes never drops, then commits all", () => {
+      const db = openDatabase(tempDbPath("polymer-queue-"));
+      quiet();
+      try {
+        const agentId = seedAgent(db);
+        const queue = new TelemetryQueue(db, {
+          maxBatches: 10,
+          flushMs: 60000,
+        });
+        let failures = 0;
+        const spans = many(
+          0,
+          3,
+          new Map([[1, failing("SQLITE_BUSY", () => failures++ < 10)]]),
+        );
+        queue.enqueue({ agentId, spans, receivedAt: "t" });
+        for (let i = 0; i < 10; i++) expect(flushThrows(queue)).toBe(true);
+        expect(getTelemetryCounter(db, DROPPED_SPANS_COUNTER)).toBe(0);
+        expect(rowCount(db)).toBe(0);
+        expect(queue.depth()).toBe(1);
+        expect(queue.flush()).toBe(3);
+        expect(getTelemetryCounter(db, DROPPED_SPANS_COUNTER)).toBe(0);
+        expect(ids(db)).toEqual(spans.map((s) => s.spanId));
+      } finally {
+        vi.restoreAllMocks();
+        closeDatabase(db);
+      }
+    });
+
+    it("unit: a deterministic (FK) failure drops the chunk on the 3rd flush; conservation holds", () => {
+      const db = openDatabase(tempDbPath("polymer-queue-"));
+      quiet();
+      try {
+        const agentId = seedAgent(db);
+        const queue = new TelemetryQueue(db, {
+          maxBatches: 10,
+          flushMs: 60000,
+        });
+        queue.enqueue({ agentId, spans: many(0, 2), receivedAt: "t" });
+        queue.enqueue({
+          agentId: "ghost",
+          spans: many(10, 1),
+          receivedAt: "t",
+        });
+        expect(flushThrows(queue)).toBe(true);
+        expect(flushThrows(queue)).toBe(true);
+        expect(queue.depth()).toBe(2);
+        expect(getTelemetryCounter(db, DROPPED_SPANS_COUNTER)).toBe(0);
+        expect(queue.flush()).toBe(0);
+        expect(queue.depth()).toBe(0);
+        expect(getTelemetryCounter(db, DROPPED_SPANS_COUNTER)).toBe(3);
+        queue.enqueue({ agentId, spans: many(20, 4), receivedAt: "t" });
+        const committed = queue.flush();
+        expect(committed).toBe(4);
+        expect(rowCount(db)).toBe(committed);
+        expect(committed + getTelemetryCounter(db, DROPPED_SPANS_COUNTER)).toBe(
+          7,
+        );
+      } finally {
+        vi.restoreAllMocks();
+        closeDatabase(db);
+      }
+    });
+
+    it("unit: a rolled-back chunk leaves no stale written/task_id_rejected counts", () => {
+      const db = openDatabase(tempDbPath("polymer-queue-"));
+      quiet();
+      try {
+        const agentId = seedAgent(db);
+        const queue = new TelemetryQueue(db, {
+          maxBatches: 10,
+          flushMs: 60000,
+        });
+        const claim: Attrs = [
+          { key: "polymer.task_id", value: { stringValue: "not-mine" } },
+          { key: "gen_ai.usage.input_tokens", value: { intValue: "5" } },
+        ];
+        queue.enqueue({
+          agentId,
+          spans: many(0, 2, new Map([[0, claim]])),
+          receivedAt: "t",
+        });
+        queue.enqueue({
+          agentId: "ghost",
+          spans: many(10, 1),
+          receivedAt: "t",
+        });
+        flushThrows(queue);
+        flushThrows(queue);
+        expect(queue.flush()).toBe(0);
+        expect(getTelemetryCounter(db, TASK_ID_REJECTED_COUNTER)).toBe(0);
+        queue.enqueue({
+          agentId,
+          spans: many(100, 2, new Map([[0, claim]])),
+          receivedAt: "t",
+        });
+        expect(queue.flush()).toBe(2);
+        expect(rowCount(db)).toBe(2);
+        expect(getTelemetryCounter(db, TASK_ID_REJECTED_COUNTER)).toBe(1);
+      } finally {
+        vi.restoreAllMocks();
+        closeDatabase(db);
+      }
+    });
+
+    it("unit: a full queue stays bounded and refuses (429 path) while flushes fail", () => {
+      const db = openDatabase(tempDbPath("polymer-queue-"));
+      try {
+        const agentId = seedAgent(db);
+        const queue = new TelemetryQueue(db, { maxBatches: 2, flushMs: 60000 });
+        const spans = many(
+          0,
+          1,
+          new Map([[0, failing("SQLITE_BUSY", () => true)]]),
+        );
+        expect(queue.enqueue({ agentId, spans, receivedAt: "t" })).toBe(true);
+        expect(
+          queue.enqueue({ agentId, spans: many(5, 1), receivedAt: "t" }),
+        ).toBe(true);
+        for (let i = 0; i < 3; i++) {
+          expect(flushThrows(queue)).toBe(true);
+          expect(
+            queue.enqueue({ agentId, spans: many(9, 1), receivedAt: "t" }),
+          ).toBe(false);
+          expect(queue.depth()).toBe(2);
+        }
+      } finally {
+        closeDatabase(db);
+      }
+    });
+
+    it("unit: a nested flush during a write is skipped and writes nothing twice", () => {
+      const db = openDatabase(tempDbPath("polymer-queue-"));
+      try {
+        const agentId = seedAgent(db);
+        const queue = new TelemetryQueue(db, {
+          maxBatches: 10,
+          flushMs: 60000,
+        });
+        let nested = -1;
+        const attrs: Attrs = [];
+        Object.defineProperty(attrs, "toJSON", {
+          value: () => {
+            nested = queue.flush();
+            return [];
+          },
+        });
+        const spans = many(0, 3, new Map([[1, attrs]]));
+        queue.enqueue({ agentId, spans, receivedAt: "t" });
+        expect(queue.flush()).toBe(3);
+        expect(nested).toBe(0);
+        expect(ids(db)).toEqual(spans.map((s) => s.spanId));
+      } finally {
+        closeDatabase(db);
+      }
+    });
+  });
 });
