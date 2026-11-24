@@ -2,12 +2,13 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { PolymerDatabase } from "../database/db.js";
 import { extractBearerToken } from "../identity/auth.js";
 import { verifySessionToken } from "../identity/credentials.js";
+import { parseOtlpLogs } from "../telemetry/logs.js";
 import { OtelError, parseOtlpBatch } from "../telemetry/otlp.js";
 import type { QueuedBatch } from "../telemetry/queue.js";
 import { readRawBody, sendJson } from "./common.js";
 
 interface OtelOptions {
-  /** Base path (default "/otel"); the route is `<base>/v1/traces`. */
+  /** Base path (default "/otel"); routes are `<base>/v1/traces` and `<base>/v1/logs`. */
   endpoint: string;
   enabled: boolean;
   maxRequestBytes: number;
@@ -37,6 +38,8 @@ function basePath(endpoint: string): string {
  * component 23 decides what acceptance means for storage). The agent
  * identity comes from the Bearer credential alone — resource
  * attributes in the payload are never consulted for identity.
+ * `/v1/logs` (#159) carries Claude Code `api_request` events: a
+ * whitelist decoder keeps only the usage fields (see telemetry/logs.ts).
  * Per-agent quotas are deferred: the design names them but gives no
  * numbers, and the shared queue bound is the backpressure mechanism
  * until they land.
@@ -53,7 +56,9 @@ export async function handleOtlpRequest(
     token: string,
   ) => ReturnType<typeof verifySessionToken> | { limited: true },
 ): Promise<boolean> {
-  if (url.pathname !== `${basePath(options.endpoint)}/v1/traces`) {
+  const base = basePath(options.endpoint);
+  const isLogs = url.pathname === `${base}/v1/logs`;
+  if (!isLogs && url.pathname !== `${base}/v1/traces`) {
     return false;
   }
   if (req.method !== "POST") {
@@ -84,19 +89,38 @@ export async function handleOtlpRequest(
     return true;
   }
   try {
-    const parsed = parseOtlpBatch(
-      req.headers["content-type"],
-      body.bytes,
-      options.batchMaxSpans,
-    );
+    // Logs: the cap applies to KEPT api_request events, not scanned
+    // records (noise events must never turn real usage into a 413).
+    const parsed = isLogs
+      ? {
+          spans: [],
+          usage: parseOtlpLogs(
+            req.headers["content-type"],
+            body.bytes,
+            options.batchMaxSpans,
+          ).events,
+        }
+      : {
+          ...parseOtlpBatch(
+            req.headers["content-type"],
+            body.bytes,
+            options.batchMaxSpans,
+          ),
+          usage: undefined,
+        };
     // 200 acknowledges validation + enqueue only, never the commit.
     // A full queue answers 429 + retry_after (backpressure, not loss).
-    const queued = enqueue({
-      agentId: session.principal.agentId,
-      spans: parsed.spans,
-      receivedAt: new Date().toISOString(),
-      bytes: body.bytes.length,
-    });
+    // A logs batch with no api_request events has nothing to queue.
+    const queued =
+      isLogs && parsed.usage!.length === 0
+        ? true
+        : enqueue({
+            agentId: session.principal.agentId,
+            spans: parsed.spans,
+            usage: parsed.usage,
+            receivedAt: new Date().toISOString(),
+            bytes: body.bytes.length,
+          });
     if (!queued) {
       sendJson(res, 429, { error: "rate_limit_exceeded", retry_after: 60 });
       return true;

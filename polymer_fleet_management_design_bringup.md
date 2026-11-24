@@ -239,6 +239,31 @@ One usage row is written per span carrying at least one mapped usage
 attribute. There is intentionally no `report_usage` tool in the MVP:
 the OTLP batch is the single telemetry intake.
 
+**Logs intake (Claude Code, #159).** `POST <telemetry.endpoint>/v1/logs`
+carries Claude Code's own export. Only log records whose `event.name`
+is `api_request` produce usage rows; every other record, attribute and
+body (prompts, responses, tool details, user ids) is skipped by a
+whitelist decoder and is never queued, logged or stored. Mapping:
+`model` → model; `input_tokens`, `output_tokens` → tokens;
+`cache_read_tokens`, `cache_creation_tokens` → `other_token_categories`;
+`cost_usd_micros` (OTLP integer) → `reported_cost_micro_usd`
+(`cost_source` `reported` means client-reported, not billing truth; the
+double `cost_usd` is never read); provider is `anthropic`. `agent_id`
+comes from the credential only (`user.id`, `session.id` and similar
+attributes never decide identity), so Claude Code subagents, which share
+the parent's process and credential, land on the parent agent's row.
+`task_id` is NULL on this path until task attribution lands. Kept
+`api_request` events are capped at `telemetry.batch_max_spans` (413
+beyond it); scanned records are bounded separately by
+`telemetry.max_request_bytes` and a fixed ceiling of 100,000 records, so
+noise events never turn real usage into a 413. `usage_id` is a hash of
+(agent, session.id, event.sequence, event.timestamp, model, tokens, cost)
+written with INSERT OR IGNORE, so an exporter retry writes once; if
+session.id, event.sequence or event.timestamp is absent the id is random
+and idempotency does not apply. Despite its name, the
+`telemetry.flush_dropped_spans` counter counts dropped rows of either
+kind (spans and usage events). OTLP metrics remain deferred.
+
 ### Aggregation (exact formulas)
 
 All sums treat NULL as 0. SQLite INTEGER is 63-bit signed (≈9.2×10¹⁸
@@ -731,6 +756,11 @@ surfaces on MCP too — tool handlers rethrow it as JSON-RPC InvalidRequest
         missing buckets are zero-filled; same 31-day maximum range.
 
 ### OTLP Ingestion
+
+    POST <telemetry.endpoint>/v1/logs (default `/otel/v1/logs`)
+      Same auth, content types, limits and responses as /v1/traces;
+      see Usage Derivation, "Logs intake". `batch_max_spans` caps KEPT
+      api_request events, not scanned records.
 
     POST <telemetry.endpoint>/v1/traces (default `/otel/v1/traces`)
       Auth: agent session token as `Authorization: Bearer <token>`

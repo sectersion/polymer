@@ -98,7 +98,9 @@ function stringValue(value: OtelAttributeValue | undefined): string | null {
  * costs cannot be negative), out-of-int64-range — is NULL, never an
  * error.
  */
-function intValue(value: OtelAttributeValue | undefined): IntBinding | null {
+export function intValue(
+  value: OtelAttributeValue | undefined,
+): IntBinding | null {
   if (value === undefined || !("intValue" in value)) return null;
   if (!/^-?\d+$/.test(value.intValue)) return null;
   let parsed: bigint;
