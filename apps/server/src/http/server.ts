@@ -11,7 +11,7 @@ import { attachUpgrade, EventBus, REVALIDATE_INTERVAL_MS } from "./events.js";
 import { WebSocketServer } from "ws";
 import { createAdminLimiters, handleAdminRequest } from "./admin.js";
 import { DEFAULT_OTEL_OPTIONS, handleOtlpRequest } from "./otel.js";
-import { TelemetryQueue } from "../telemetry/queue.js";
+import { DEFAULT_QUEUE_MAX_BYTES, TelemetryQueue } from "../telemetry/queue.js";
 import {
   DEFAULT_RETENTION_DAYS,
   runTelemetryRetention,
@@ -90,6 +90,11 @@ interface PolymerServerOptions {
   telemetryBatchMaxSpans?: number;
   /** Component 23: max batches held in memory (default 100). */
   telemetryQueueMaxBatches?: number;
+  /** Wire-byte budget across queued OTLP batches (default 64 MiB;
+   * design key telemetry.queue_max_bytes). Clamped to at least
+   * telemetryMaxRequestBytes so one maximum-size request always fits;
+   * non-finite or <= 0 values are refused at startup. */
+  telemetryQueueMaxBytes?: number;
   /** Component 23: flush interval in ms (default 1000). */
   telemetryBatchFlushMs?: number;
   /** Component 28: telemetry retention window in days (default 7).
@@ -202,8 +207,21 @@ export async function createPolymerServer(
   // Component 23: the bounded telemetry queue. One per server; the
   // OTLP handler enqueues validated batches and the timer flushes
   // them to SQLite. Unref'd so tests never hang on the handle.
+  const requestedQueueBytes =
+    options.telemetryQueueMaxBytes ?? DEFAULT_QUEUE_MAX_BYTES;
+  // Clamp valid values up to one max-size request; pass nonsense
+  // through unclamped so the queue refuses it at startup.
+  const queueMaxBytes =
+    Number.isFinite(requestedQueueBytes) && requestedQueueBytes > 0
+      ? Math.max(
+          requestedQueueBytes,
+          options.telemetryMaxRequestBytes ??
+            DEFAULT_OTEL_OPTIONS.maxRequestBytes,
+        )
+      : requestedQueueBytes;
   const telemetryQueue = new TelemetryQueue(db, {
     maxBatches: options.telemetryQueueMaxBatches ?? 100,
+    maxBytes: queueMaxBytes,
     flushMs: options.telemetryBatchFlushMs ?? 1000,
   });
   telemetryQueue.start();

@@ -1162,6 +1162,7 @@ and invalidates the old hash atomically; the operation writes an
     "batch_flush_ms": 1000,
     "batch_max_spans": 500,
     "queue_max_batches": 100,
+    "queue_max_bytes": 67108864,
     "max_request_bytes": 10485760
   },
   "auth": {
@@ -1203,6 +1204,7 @@ the key name says otherwise. `null` means unset/open.
     telemetry.batch_flush_ms: int (milliseconds), default 1000
     telemetry.batch_max_spans: int, default 500
     telemetry.queue_max_batches: int, default 100
+    telemetry.queue_max_bytes: bytes, default 67108864 (64 MiB of request-body wire bytes across queued batches; clamped to >= telemetry.max_request_bytes; must be finite and > 0)
     telemetry.max_request_bytes: bytes, default 10485760
     auth.initTokenExpiry: seconds, default 600
     auth.sessionTokenExpiry: seconds, default 604800 (7 days)
