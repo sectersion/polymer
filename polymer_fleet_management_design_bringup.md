@@ -260,7 +260,9 @@ noise events never turn real usage into a 413. `usage_id` is a hash of
 (agent, session.id, event.sequence, event.timestamp, model, tokens, cost)
 written with INSERT OR IGNORE, so an exporter retry writes once; if
 session.id, event.sequence or event.timestamp is absent the id is random
-and idempotency does not apply. OTLP metrics remain deferred.
+and idempotency does not apply. Despite its name, the
+`telemetry.flush_dropped_spans` counter counts dropped rows of either
+kind (spans and usage events). OTLP metrics remain deferred.
 
 ### Aggregation (exact formulas)
 

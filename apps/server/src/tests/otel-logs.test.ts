@@ -254,6 +254,79 @@ describe("POST /otel/v1/logs (#159)", () => {
     });
   });
 
+  it("http/protobuf through the real route: a LogRecord with time_unix_nano, flags and AnyValue-int usage yields the exact rows", async () => {
+    const { agent, post, rows, settle } = await setup();
+    const fixed64 = (field: number, v: bigint): Uint8Array => {
+      const b = Buffer.alloc(8);
+      b.writeBigUInt64LE(v);
+      return cat(varint((field << 3) | 1), b);
+    };
+    const fixed32 = (field: number, v: number): Uint8Array => {
+      const b = Buffer.alloc(4);
+      b.writeUInt32LE(v);
+      return cat(varint((field << 3) | 5), b);
+    };
+    const rec = (seq: number, input: number, cost: number): Uint8Array =>
+      cat(
+        fixed64(1, 1700000001000000000n), // time_unix_nano
+        fixed64(11, 1700000001000000000n), // observed_time_unix_nano
+        varint((2 << 3) | 0),
+        varint(9), // severity_number
+        ld(3, Buffer.from("INFO")),
+        ld(5, pbStr("claude_code.api_request")), // body
+        pbKv("event.name", pbStr("api_request")),
+        pbKv("model", pbStr("fake-model")),
+        pbKv("input_tokens", pbInt(input)),
+        pbKv("output_tokens", pbInt(20)),
+        pbKv("cache_read_tokens", pbInt(300)),
+        pbKv("cache_creation_tokens", pbInt(40)),
+        pbKv("cost_usd_micros", pbInt(cost)),
+        pbKv("session.id", pbStr("fake-session-pb")),
+        pbKv("event.sequence", pbInt(seq)),
+        pbKv("event.timestamp", pbStr("2023-11-14T22:13:21.000Z")),
+        fixed32(8, 1), // flags
+      );
+    const resource = ld(
+      1,
+      ld(
+        1,
+        cat(
+          ld(1, Buffer.from("service.name")),
+          ld(2, pbStr("fixture-service")),
+        ),
+      ),
+    );
+    const scope = ld(1, ld(1, Buffer.from("com.anthropic.claude_code.events")));
+    const scopeLogs = ld(
+      2,
+      cat(scope, ld(2, rec(1, 1000, 12346)), ld(2, rec(2, 5, 7))),
+    );
+    const body = ld(1, cat(resource, scopeLogs));
+    const res = await post(body, "application/x-protobuf");
+    expect(res.status).toBe(200);
+    await settle(2);
+    const r = rows();
+    expect(r).toHaveLength(2);
+    expect(
+      r.map((x) => [
+        x["agent_id"],
+        x["model"],
+        x["input_tokens"],
+        x["output_tokens"],
+        x["reported_cost_micro_usd"],
+        x["cost_source"],
+        x["task_id"],
+      ]),
+    ).toEqual([
+      [agent.agentId, "fake-model", 1000, 20, 12346, "reported", null],
+      [agent.agentId, "fake-model", 5, 20, 7, "reported", null],
+    ]);
+    expect(JSON.parse(r[0]!["other_token_categories"] as string)).toEqual({
+      cache_read_tokens: 300,
+      cache_creation_tokens: 40,
+    });
+  });
+
   it("forged identity attributes never change the owner", async () => {
     const { agent, post, rows, settle } = await setup();
     const body = logsBody([
