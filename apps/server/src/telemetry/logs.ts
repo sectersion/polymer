@@ -38,6 +38,7 @@ const KEY_COST_MICROS = "cost_usd_micros";
 const KEY_SESSION = "session.id";
 const KEY_SEQUENCE = "event.sequence";
 const KEY_TIMESTAMP = "event.timestamp";
+const KEY_TASK = "polymer.task_id";
 
 const WANTED = new Set([
   KEY_EVENT_NAME,
@@ -50,7 +51,16 @@ const WANTED = new Set([
   KEY_SESSION,
   KEY_SEQUENCE,
   KEY_TIMESTAMP,
+  KEY_TASK,
 ]);
+
+/** Only this key is read from Resource.attributes. */
+const RESOURCE_WANTED = new Set([KEY_TASK]);
+
+/** A task claim is a UUID-shaped string of at most this many chars. */
+const MAX_CLAIM_CHARS = 36;
+const CLAIM_SHAPE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Longest string kept from any whitelisted attribute. */
 const MAX_FIELD_CHARS = 256;
@@ -66,6 +76,13 @@ export interface UsageEvent {
   sessionId: string | null;
   sequence: IntBinding | null;
   timestamp: string | null;
+  /**
+   * `polymer.task_id` (record attribute, else resource attribute) when
+   * it is a UUID-shaped string; honored only through resolveUsageTask.
+   */
+  taskClaim: string | null;
+  /** A string claim was present but over-long or not UUID-shaped: rejected, never echoed. */
+  taskClaimMalformed: boolean;
 }
 
 export interface ParsedLogs {
@@ -92,7 +109,31 @@ function str(v: OtelAttributeValue | undefined): string | null {
     : null;
 }
 
-function toEvent(bag: Bag): UsageEvent {
+/**
+ * Task claim from the record, else from the resource. Absent, empty or
+ * non-string values mean "no claim" (ignored); a non-empty string that
+ * is over-long or not UUID-shaped is a malformed claim (counted as
+ * rejected by the writer, never stored or logged).
+ */
+function claimOf(
+  record: OtelAttributeValue | undefined,
+  resource: OtelAttributeValue | undefined,
+): { claim: string | null; malformed: boolean } {
+  const v = record !== undefined && "stringValue" in record ? record : resource;
+  if (v === undefined || !("stringValue" in v) || v.stringValue === "") {
+    return { claim: null, malformed: false };
+  }
+  if (
+    v.stringValue.length > MAX_CLAIM_CHARS ||
+    !CLAIM_SHAPE.test(v.stringValue)
+  ) {
+    return { claim: null, malformed: true };
+  }
+  return { claim: v.stringValue, malformed: false };
+}
+
+function toEvent(bag: Bag, resource: Bag): UsageEvent {
+  const claim = claimOf(bag.get(KEY_TASK), resource.get(KEY_TASK));
   return {
     model: str(bag.get(KEY_MODEL)),
     inputTokens: intValue(bag.get(KEY_INPUT)),
@@ -103,6 +144,8 @@ function toEvent(bag: Bag): UsageEvent {
     sessionId: str(bag.get(KEY_SESSION)),
     sequence: intValue(bag.get(KEY_SEQUENCE)),
     timestamp: str(bag.get(KEY_TIMESTAMP)),
+    taskClaim: claim.claim,
+    taskClaimMalformed: claim.malformed,
   };
 }
 
@@ -122,7 +165,11 @@ function decodeScalar(buf: Uint8Array): OtelAttributeValue | null {
 }
 
 /** KeyValue: the key is read first; the value only if the key is whitelisted. */
-function decodeWantedKeyValue(buf: Uint8Array, bag: Bag): void {
+function decodeWantedKeyValue(
+  buf: Uint8Array,
+  bag: Bag,
+  wanted: Set<string> = WANTED,
+): void {
   const r = new Reader(buf);
   let key: string | null = null;
   let valueBytes: Uint8Array | null = null;
@@ -138,7 +185,7 @@ function decodeWantedKeyValue(buf: Uint8Array, bag: Bag): void {
       r.skip(wire);
     }
   }
-  if (key === null || valueBytes === null || !WANTED.has(key)) return;
+  if (key === null || valueBytes === null || !wanted.has(key)) return;
   const value = decodeScalar(valueBytes);
   if (value !== null) bag.set(key, value);
 }
@@ -164,14 +211,32 @@ function decodeProtobufLogs(buf: Uint8Array, maxEvents: number): UsageEvent[] {
       top.skip(w1);
       continue;
     }
-    const rl = new Reader(top.bytes()); // ResourceLogs
+    // ResourceLogs: resource (1) and scope_logs (2) may arrive in any
+    // order, so collect first, then decode scopes against the resource.
+    const rl = new Reader(top.bytes());
+    const resource: Bag = new Map();
+    const scopes: Uint8Array[] = [];
     while (!rl.eof()) {
       const [f2, w2] = rl.tag();
-      if (!(f2 === 2 && w2 === 2)) {
+      if (f2 === 1 && w2 === 2) {
+        // Resource.attributes is field 1 (not 2; see #154 for traces).
+        const res = new Reader(rl.bytes());
+        while (!res.eof()) {
+          const [f, w] = res.tag();
+          if (f === 1 && w === 2) {
+            decodeWantedKeyValue(res.bytes(), resource, RESOURCE_WANTED);
+          } else {
+            res.skip(w);
+          }
+        }
+      } else if (f2 === 2 && w2 === 2) {
+        scopes.push(rl.bytes());
+      } else {
         rl.skip(w2);
-        continue;
       }
-      const sl = new Reader(rl.bytes()); // ScopeLogs
+    }
+    for (const scope of scopes) {
+      const sl = new Reader(scope); // ScopeLogs
       while (!sl.eof()) {
         const [f3, w3] = sl.tag();
         if (!(f3 === 2 && w3 === 2)) {
@@ -186,7 +251,7 @@ function decodeProtobufLogs(buf: Uint8Array, maxEvents: number): UsageEvent[] {
         if (events.length >= maxEvents) {
           throw new OtelError("payload_too_large");
         }
-        events.push(toEvent(bag));
+        events.push(toEvent(bag, resource));
       }
     }
   }
@@ -229,6 +294,16 @@ function decodeJsonLogs(root: unknown, maxEvents: number): UsageEvent[] {
   const events: UsageEvent[] = [];
   let scanned = 0;
   for (const rl of arr(obj(root)["resourceLogs"])) {
+    const resource: Bag = new Map();
+    const resObj = obj(rl)["resource"];
+    if (resObj !== undefined) {
+      for (const kv of arr(obj(resObj)["attributes"])) {
+        const e = obj(kv);
+        if (e["key"] !== KEY_TASK) continue;
+        const value = jsonScalar(e["value"]);
+        if (value !== null) resource.set(KEY_TASK, value);
+      }
+    }
     for (const sl of arr(obj(rl)["scopeLogs"])) {
       for (const rec of arr(obj(sl)["logRecords"])) {
         if (++scanned > MAX_LOG_RECORDS_SCANNED) {
@@ -246,7 +321,7 @@ function decodeJsonLogs(root: unknown, maxEvents: number): UsageEvent[] {
         if (events.length >= maxEvents) {
           throw new OtelError("payload_too_large");
         }
-        events.push(toEvent(bag));
+        events.push(toEvent(bag, resource));
       }
     }
   }
