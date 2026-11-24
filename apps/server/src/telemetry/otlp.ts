@@ -59,6 +59,14 @@ export class OtelError extends Error {
 
 const malformed = (): OtelError => new OtelError("invalid_request");
 
+/**
+ * Deepest array/kvlist nesting an attribute value may have; the
+ * top-level value is depth 0. Real OTel attributes are scalars, and
+ * unbounded recursion would end in a RangeError (a 500) on intake or
+ * in JSON.stringify at flush (a dropped chunk).
+ */
+const MAX_ATTRIBUTE_DEPTH = 32;
+
 /** Minimal protobuf reader: only the wire types OTLP trace uses. */
 class Reader {
   pos = 0;
@@ -177,7 +185,11 @@ function checkParentSpanId(hex: string): void {
   if (!checkId(hex, 16)) throw malformed();
 }
 
-function decodeAttributeValue(reader: Reader): OtelAttributeValue {
+function decodeAttributeValue(
+  reader: Reader,
+  depth: number,
+): OtelAttributeValue {
+  if (depth > MAX_ATTRIBUTE_DEPTH) throw malformed();
   for (;;) {
     if (reader.eof()) throw malformed();
     const [field, wire] = reader.tag();
@@ -202,7 +214,9 @@ function decodeAttributeValue(reader: Reader): OtelAttributeValue {
         if (inner.eof()) break;
         const [f, w] = inner.tag();
         if (f === 1 && w === 2) {
-          values.push(decodeAttributeValue(new Reader(inner.bytes())));
+          values.push(
+            decodeAttributeValue(new Reader(inner.bytes()), depth + 1),
+          );
         } else {
           inner.skip(w);
         }
@@ -216,7 +230,7 @@ function decodeAttributeValue(reader: Reader): OtelAttributeValue {
         if (inner.eof()) break;
         const [f, w] = inner.tag();
         if (f === 1 && w === 2) {
-          values.push(decodeKeyValue(new Reader(inner.bytes())));
+          values.push(decodeKeyValue(new Reader(inner.bytes()), depth + 1));
         } else {
           inner.skip(w);
         }
@@ -230,7 +244,10 @@ function decodeAttributeValue(reader: Reader): OtelAttributeValue {
   }
 }
 
-function decodeKeyValue(reader: Reader): {
+function decodeKeyValue(
+  reader: Reader,
+  depth: number,
+): {
   key: string;
   value: OtelAttributeValue;
 } {
@@ -242,7 +259,7 @@ function decodeKeyValue(reader: Reader): {
     if (field === 1 && wire === 2) {
       key = Buffer.from(reader.bytes()).toString("utf8");
     } else if (field === 2 && wire === 2) {
-      value = decodeAttributeValue(new Reader(reader.bytes()));
+      value = decodeAttributeValue(new Reader(reader.bytes()), depth);
     } else {
       reader.skip(wire);
     }
@@ -259,7 +276,7 @@ function decodeResourceAttributes(reader: Reader): OtelAttribute[] {
     if (reader.eof()) break;
     const [field, wire] = reader.tag();
     if (field === 2 && wire === 2) {
-      out.push(decodeKeyValue(new Reader(reader.bytes())));
+      out.push(decodeKeyValue(new Reader(reader.bytes()), 0));
     } else {
       reader.skip(wire);
     }
@@ -314,7 +331,11 @@ function decodeSpan(
   spans: ValidatedSpan[],
   resourceAttributes: OtelAttribute[],
   scope: DecodedScope,
+  maxSpans: number,
 ): void {
+  // Checked before any field of this span is decoded: span max+1 is
+  // never built.
+  if (spans.length >= maxSpans) throw new OtelError("payload_too_large");
   let traceId = "";
   let spanId = "";
   let parentSpanId: string | null = null;
@@ -356,7 +377,7 @@ function decodeSpan(
     } else if (field === 9 && wire === 2) {
       // Span.attributes is field 9, repeated KeyValue: one entry per
       // field occurrence (no wrapper message).
-      attributes.push(decodeKeyValue(new Reader(reader.bytes())));
+      attributes.push(decodeKeyValue(new Reader(reader.bytes()), 0));
     } else if (field === 15 && wire === 2) {
       const status = decodeStatus(new Reader(reader.bytes()));
       statusCode = status.code;
@@ -389,6 +410,7 @@ function decodeScopeSpans(
   reader: Reader,
   spans: ValidatedSpan[],
   resourceAttributes: OtelAttribute[],
+  maxSpans: number,
 ): void {
   // Scope (field 1) and spans (field 2, repeated) are siblings of
   // one ScopeSpans message, in any order: collect first, then decode
@@ -406,16 +428,23 @@ function decodeScopeSpans(
       scope = decodeScope(new Reader(reader.bytes()));
     } else if (field === 2) {
       spanPayloads.push(reader.bytes());
+      if (spans.length + spanPayloads.length > maxSpans) {
+        throw new OtelError("payload_too_large");
+      }
     } else {
       reader.skip(wire);
     }
   }
   for (const payload of spanPayloads) {
-    decodeSpan(new Reader(payload), spans, resourceAttributes, scope);
+    decodeSpan(new Reader(payload), spans, resourceAttributes, scope, maxSpans);
   }
 }
 
-function decodeResourceSpans(reader: Reader, spans: ValidatedSpan[]): void {
+function decodeResourceSpans(
+  reader: Reader,
+  spans: ValidatedSpan[],
+  maxSpans: number,
+): void {
   // Resource (field 1) and ScopeSpans (field 2) are siblings: the
   // resource attributes must apply to every span below, so collect
   // payloads first, decode the resource, then the scopes — order in
@@ -442,11 +471,11 @@ function decodeResourceSpans(reader: Reader, spans: ValidatedSpan[]): void {
     resourceAttributes.push(...decodeResourceAttributes(new Reader(payload)));
   }
   for (const payload of scopePayloads) {
-    decodeScopeSpans(new Reader(payload), spans, resourceAttributes);
+    decodeScopeSpans(new Reader(payload), spans, resourceAttributes, maxSpans);
   }
 }
 
-function decodeProtobuf(buf: Uint8Array): ValidatedSpan[] {
+function decodeProtobuf(buf: Uint8Array, maxSpans: number): ValidatedSpan[] {
   const reader = new Reader(buf);
   const spans: ValidatedSpan[] = [];
   for (;;) {
@@ -454,7 +483,7 @@ function decodeProtobuf(buf: Uint8Array): ValidatedSpan[] {
     const [field, wire] = reader.tag();
     // Field 1 (resource_spans) is length-delimited.
     if (field === 1 && wire === 2) {
-      decodeResourceSpans(new Reader(reader.bytes()), spans);
+      decodeResourceSpans(new Reader(reader.bytes()), spans, maxSpans);
     } else {
       reader.skip(wire);
     }
@@ -505,7 +534,11 @@ function decodeJsonNano(value: unknown): string {
   return text.replace(/^0+(?=\d)/, "");
 }
 
-function decodeJsonAttributeValue(value: unknown): OtelAttributeValue {
+function decodeJsonAttributeValue(
+  value: unknown,
+  depth: number,
+): OtelAttributeValue {
+  if (depth > MAX_ATTRIBUTE_DEPTH) throw malformed();
   const record = asRecord(value);
   if (typeof record["stringValue"] === "string") {
     return { stringValue: record["stringValue"] };
@@ -530,7 +563,11 @@ function decodeJsonAttributeValue(value: unknown): OtelAttributeValue {
   if (record["arrayValue"] !== undefined) {
     const items = asRecord(record["arrayValue"])["values"] ?? [];
     if (!Array.isArray(items)) throw malformed();
-    return { arrayValue: { values: items.map(decodeJsonAttributeValue) } };
+    return {
+      arrayValue: {
+        values: items.map((v) => decodeJsonAttributeValue(v, depth + 1)),
+      },
+    };
   }
   if (record["kvlistValue"] !== undefined) {
     const items = asRecord(record["kvlistValue"])["values"] ?? [];
@@ -542,7 +579,7 @@ function decodeJsonAttributeValue(value: unknown): OtelAttributeValue {
           if (typeof entry["key"] !== "string") throw malformed();
           return {
             key: entry["key"] as string,
-            value: decodeJsonAttributeValue(entry["value"]),
+            value: decodeJsonAttributeValue(entry["value"], depth + 1),
           };
         }),
       },
@@ -559,7 +596,7 @@ function decodeJsonAttributes(value: unknown): OtelAttribute[] {
     if (typeof entry["key"] !== "string") throw malformed();
     return {
       key: entry["key"] as string,
-      value: decodeJsonAttributeValue(entry["value"]),
+      value: decodeJsonAttributeValue(entry["value"], 0),
     };
   });
 }
@@ -573,7 +610,7 @@ function decodeJsonScope(value: unknown): { name: string; version: string } {
   };
 }
 
-function decodeJson(value: unknown): ValidatedSpan[] {
+function decodeJson(value: unknown, maxSpans: number): ValidatedSpan[] {
   const root = asRecord(value);
   const resourceSpans = root["resourceSpans"] ?? [];
   if (!Array.isArray(resourceSpans)) throw malformed();
@@ -593,6 +630,8 @@ function decodeJson(value: unknown): ValidatedSpan[] {
       const list = scopeBlock["spans"] ?? [];
       if (!Array.isArray(list)) throw malformed();
       for (const item of list) {
+        // Before any decode work: span max+1 is never built.
+        if (spans.length >= maxSpans) throw new OtelError("payload_too_large");
         const span = asRecord(item);
         const traceId = span["traceId"];
         const spanId = span["spanId"];
@@ -654,8 +693,10 @@ interface ParsedBatch {
 
 /**
  * Parse and structurally validate one OTLP trace batch. Throws
- * OtelError("invalid_request") on malformed payloads and
- * OtelError("payload_too_large") past `maxSpans`.
+ * OtelError("invalid_request") on malformed payloads (including
+ * attribute nesting past MAX_ATTRIBUTE_DEPTH) and
+ * OtelError("payload_too_large") as soon as the decoded span count
+ * would pass `maxSpans` (mid-decode, before that span is built).
  */
 export function parseOtlpBatch(
   contentType: string | undefined,
@@ -665,7 +706,7 @@ export function parseOtlpBatch(
   const media = (contentType ?? "").split(";")[0].trim().toLowerCase();
   let raw: ValidatedSpan[];
   if (media === "application/x-protobuf") {
-    raw = decodeProtobuf(body);
+    raw = decodeProtobuf(body, maxSpans);
   } else if (media === "application/json") {
     let value: unknown;
     try {
@@ -673,12 +714,9 @@ export function parseOtlpBatch(
     } catch {
       throw malformed();
     }
-    raw = decodeJson(value);
+    raw = decodeJson(value, maxSpans);
   } else {
     throw malformed();
-  }
-  if (raw.length > maxSpans) {
-    throw new OtelError("payload_too_large");
   }
   return { spans: raw };
 }
