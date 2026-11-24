@@ -252,7 +252,17 @@ double `cost_usd` is never read); provider is `anthropic`. `agent_id`
 comes from the credential only (`user.id`, `session.id` and similar
 attributes never decide identity), so Claude Code subagents, which share
 the parent's process and credential, land on the parent agent's row.
-`task_id` is NULL on this path until task attribution lands. Kept
+`task_id` comes only from a `polymer.task_id` attribute (record
+attribute, else Resource attribute; Claude Code copies
+`OTEL_RESOURCE_ATTRIBUTES` keys onto both) and is honored exactly as for
+spans: only for a task the authenticated agent coordinates or is assigned
+to; otherwise the row is stored with NULL `task_id` and
+`telemetry.task_id_rejected` increments once per record carrying the
+rejected (or malformed, over-long, non-UUID-shaped) claim, never per
+batch and never again for an exporter retry of a stored event. Empty and
+non-string claims are ignored. A resource attribute is fixed when the
+Claude Code process starts, so this attributes only sessions launched for
+one known task; no other attribute is read. Kept
 `api_request` events are capped at `telemetry.batch_max_spans` (413
 beyond it); scanned records are bounded separately by
 `telemetry.max_request_bytes` and a fixed ceiling of 100,000 records, so

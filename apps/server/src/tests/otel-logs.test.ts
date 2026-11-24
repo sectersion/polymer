@@ -104,6 +104,8 @@ describe("OTLP logs decoder (#159)", () => {
         sessionId: "fake-session-0001",
         sequence: 26,
         timestamp: "2023-11-14T22:13:21.000Z",
+        taskClaim: null,
+        taskClaimMalformed: false,
       },
     ]);
   });
@@ -468,6 +470,8 @@ describe("POST /otel/v1/logs (#159)", () => {
       sessionId: "fake-session-q",
       sequence: i,
       timestamp: "2023-11-14T22:13:20.000Z",
+      taskClaim: null,
+      taskClaimMalformed: false,
     }));
     expect(
       q.enqueue({

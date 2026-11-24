@@ -2,6 +2,7 @@ import type { PolymerDatabase } from "../database/db.js";
 import { usageEventId, type UsageEvent } from "./logs.js";
 import type { ValidatedSpan } from "./otlp.js";
 import {
+  TASK_ID_ATTRIBUTE,
   TASK_ID_REJECTED_COUNTER,
   deriveSpanUsage,
   resolveUsageTask,
@@ -233,10 +234,28 @@ export class TelemetryQueue {
             if (typeof e.cacheCreationTokens === "number") {
               other["cache_creation_tokens"] = e.cacheCreationTokens;
             }
+            // The claim goes through resolveUsageTask UNCHANGED (wrapped as
+            // the span attribute it reads): honored only for a task this
+            // agent coordinates or is assigned to. A malformed claim is
+            // rejected without being stored or echoed.
+            let claimedTask: string | null = null;
+            let claimRejected = e.taskClaimMalformed;
+            if (e.taskClaim !== null) {
+              const resolved = resolveUsageTask(this.db!, row.agentId, {
+                attributes: [
+                  {
+                    key: TASK_ID_ATTRIBUTE,
+                    value: { stringValue: e.taskClaim },
+                  },
+                ],
+              } as ValidatedSpan);
+              claimedTask = resolved.taskId;
+              claimRejected = resolved.rejected;
+            }
             const r = logUsageInsert.run(
               usageEventId(row.agentId, e),
               row.agentId,
-              null,
+              claimedTask,
               null,
               "anthropic",
               e.model,
@@ -248,6 +267,11 @@ export class TelemetryQueue {
               row.receivedAt,
             );
             chunkWritten += Number(r.changes);
+            // Per RECORD, and only for a row actually inserted (an
+            // exporter retry of a stored event must not recount). The
+            // local is per chunk, bumped inside this transaction, so a
+            // rollback leaves no stale count.
+            if (claimRejected && Number(r.changes) === 1) rejectedClaims += 1;
             continue;
           }
           const result = insert.run(

@@ -109,6 +109,11 @@ usage/cost rows server-side (all optional; missing means NULL):
 - `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`
 - `gen_ai.usage.cost_micro_usd` (integer micro-USD; floats are ignored)
 
+For Claude Code's own export (logs), launch the session with
+`OTEL_RESOURCE_ATTRIBUTES=polymer.task_id=<task uuid>`; the same honoring
+rule applies, but the value is fixed for the life of the process, so it
+only attributes a session started for one known task.
+
 Claim a task on a span with `polymer.task_id` (the task UUID) — it is
 honored only for tasks you coordinate or are assigned to. Never put
 secrets in attributes.
